@@ -1,0 +1,23 @@
+# Local Postgres for development: `pnpm db:up`.
+# Port 5433 so it doesn't clash with a Postgres already installed on port 5432.
+name: promptmotion
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: promptmotion
+      POSTGRES_PASSWORD: promptmotion
+      POSTGRES_DB: promptmotion
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U promptmotion -d promptmotion"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  postgres-data:

@@ -1,0 +1,26 @@
+{
+  "name": "@promptmotion/video",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "studio": "remotion studio src/entry.ts --port=3001"
+  },
+  "dependencies": {
+    "@promptmotion/shared": "workspace:*",
+    "remotion": "4.0.545"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@remotion/cli": "4.0.545",
+    "@types/react": "19.3.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1795427904259,
+      "tag": "0000_green_ink",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795428322420,
+      "tag": "0001_motionless_pride",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795435323257,
+      "tag": "0002_fixed_wildside",
+      "breakpoints": true
+    }
+  ]
+}

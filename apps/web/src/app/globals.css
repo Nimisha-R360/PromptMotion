@@ -1,0 +1,6 @@
+@import "tailwindcss";
+
+/* The editor is dark, like most video tools. */
+:root {
+  color-scheme: dark;
+}

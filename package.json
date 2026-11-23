@@ -1,0 +1,32 @@
+{
+  "name": "promptmotion",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.10.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @promptmotion/shared run build && pnpm --parallel --filter @promptmotion/shared --filter @promptmotion/web --filter @promptmotion/api run dev",
+    "studio": "pnpm --filter @promptmotion/shared run build && pnpm --filter @promptmotion/video run studio",
+    "build": "pnpm -r run build",
+    "lint": "eslint .",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:generate": "pnpm --filter @promptmotion/api run db:generate",
+    "db:migrate": "pnpm --filter @promptmotion/api run db:migrate",
+    "db:seed": "pnpm --filter @promptmotion/shared run build && pnpm --filter @promptmotion/api run db:seed",
+    "plan": "pnpm --filter @promptmotion/shared run build && pnpm --filter @promptmotion/api run plan"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@next/eslint-plugin-next": "16.4.6",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.14.0",
+    "prettier": "3.10.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.73.0"
+  }
+}
