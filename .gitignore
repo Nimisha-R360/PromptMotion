@@ -45,3 +45,28 @@ next-env.d.ts
 /runtime-dist
 /.venv
 architecture.png
+*.log
+
+# local databases (default lives in /data, but DATABASE_PATH can point elsewhere)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# local LLM model weights
+*.gguf
+
+# python
+__pycache__/
+*.py[cod]
+
+# editors / OS
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+
+# local Claude Code settings
+.claude/settings.local.json
