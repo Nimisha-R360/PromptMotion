@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // generated runtime bundle, local data and python venv
+    "runtime-dist/**",
+    "data/**",
+    ".venv/**",
   ]),
 ]);
 

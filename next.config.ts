@@ -1,9 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
+  // native / heavy server-only modules are loaded from node_modules at runtime
+  serverExternalPackages: ["better-sqlite3", "pdfjs-dist", "jszip", "@strands-agents/sdk"],
+  // the runtime bundle is read from disk by lib/compose.ts
+  outputFileTracingIncludes: { "/api/**/*": ["./runtime-dist/**/*", "./db/migrations/**/*"] },
   turbopack: {
     rules: {
       "*.css": {

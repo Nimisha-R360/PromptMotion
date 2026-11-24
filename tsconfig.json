@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -19,7 +23,15 @@
       }
     ],
     "paths": {
-      "@/*": ["./*"]
+      "@/*": [
+        "./*"
+      ],
+      "remotion-core/*": [
+        "./node_modules/remotion/dist/cjs/*"
+      ],
+      "remotion-shapes/*": [
+        "./node_modules/@remotion/shapes/dist/utils/*"
+      ]
     }
   },
   "include": [
@@ -30,5 +42,10 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    "data",
+    "runtime-dist",
+    ".venv"
+  ]
 }
