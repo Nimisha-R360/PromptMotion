@@ -18,6 +18,8 @@ export interface SlideBrief {
   stats?: Stat[];
   /** `asset:<id>` */
   image?: string;
+  /** every uploaded picture/clip for this slide (`asset:<id>`; `image` is the first) */
+  images?: string[];
   /** true when content is fixed (uploaded slides): the designer must not rewrite it */
   locked?: boolean;
 }
@@ -52,6 +54,16 @@ export interface ProjectSummary {
   updatedAt: string;
 }
 
+/** An image or video clip the user uploaded to a project, for the agent to place on slides. */
+export interface MediaAsset {
+  /** `asset:<id>` — what slides store */
+  ref: string;
+  name: string;
+  mime: string;
+  kind: "image" | "video";
+  bytes: number;
+}
+
 export interface Project {
   id: string;
   title: string;
@@ -66,4 +78,6 @@ export interface Project {
   updatedAt: string;
   slides: Slide[];
   messages: Message[];
+  /** uploaded images / video clips */
+  media: MediaAsset[];
 }

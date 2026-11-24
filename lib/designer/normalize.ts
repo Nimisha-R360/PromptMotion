@@ -1,4 +1,5 @@
 import { COMPONENTS, getComponent } from "@/runtime/registry";
+import { remocnAcceptsMedia, remocnCandidates } from "@/runtime/remocn/registry";
 import { DEFAULT_ANIMATIONS } from "@/runtime/demo";
 import { LAYOUTS, STYLES, SLOT_CATEGORY, type Framework, type Item, type Layout, type SlideAnimations, type SlideSpec, type Slot, type Stat } from "@/runtime/types";
 import type { Mood, SlideBrief } from "@/lib/types";
@@ -105,8 +106,8 @@ export function compatibleLayouts(brief: SlideBrief, index: number, total: numbe
     if (!bullets.length) set.add("hero").add("closing");
   }
   if (!set.size) set.add(bullets.length ? "title-bullets" : "hero");
-  // only split-image can show a picture — never drop the user's image
-  if (brief.image) return ["split-image"];
+  // only split-image (or, for a picture-only slide, a remocn showcase scene that shows it) can present the image — never drop it
+  if (brief.image) return !bullets.length && !brief.items?.length && !brief.stats?.length ? ["split-image", "showcase"] : ["split-image"];
   return LAYOUTS.filter((l) => set.has(l));
 }
 
@@ -115,7 +116,7 @@ export function contentForLayout(brief: SlideBrief, layout: Layout): Partial<Sli
   const bullets = brief.bullets ?? [];
   const items = brief.items?.length ? brief.items : bulletsToItems(bullets);
   const stats = brief.stats?.length ? brief.stats : bulletsToStats(bullets);
-  const base: Partial<SlideSpec> = { title: brief.title, subtitle: brief.subtitle, image: brief.image };
+  const base: Partial<SlideSpec> = { title: brief.title, subtitle: brief.subtitle, image: brief.image, images: brief.images };
   switch (LAYOUT_GROUP[layout]) {
     case "text":
       return { ...base, body: brief.body, bullets: bullets.every((b) => b.length <= 32) ? bullets.slice(0, 4) : [], subtitle: brief.subtitle ?? (bullets.length && bullets.some((b) => b.length > 32) ? bullets[0] : undefined) };
@@ -127,11 +128,18 @@ export function contentForLayout(brief: SlideBrief, layout: Layout): Partial<Sli
       return { ...base, items };
     case "quote":
       return { ...base, body: brief.body ?? bullets.join(" "), subtitle: brief.subtitle };
+    case "showcase":
+      return { ...base, body: brief.body };
   }
 }
 
 /** Make any model output (or partial edit) into a valid SlideSpec. */
-export function normalizeSpec(raw: Partial<SlideSpec> & Record<string, unknown>, brief: SlideBrief, opts: { index: number; mood: Mood; avoid?: string[] }): SlideSpec {
+export function normalizeSpec(
+  raw: Partial<SlideSpec> & Record<string, unknown>,
+  brief: SlideBrief,
+  /** video: the slide's uploaded media is a video clip (only the split-image media block can play it) */
+  opts: { index: number; mood: Mood; avoid?: string[]; video?: boolean },
+): SlideSpec {
   const layout: Layout = (LAYOUTS as readonly string[]).includes(raw.layout as string) ? (raw.layout as Layout) : (brief.layout ?? "title-bullets");
   const picked = pickAnimations({ mood: opts.mood, seed: opts.index * 131 + 7, prefer: engineForIndex(opts.index), avoid: opts.avoid });
   const animations = { ...picked } as SlideAnimations;
@@ -151,6 +159,7 @@ export function normalizeSpec(raw: Partial<SlideSpec> & Record<string, unknown>,
         items: cleanItems(raw.items),
         stats: cleanStats(raw.stats),
         image: brief.image,
+        images: brief.images,
       };
 
   // never render a layout whose content slots are empty
@@ -161,6 +170,15 @@ export function normalizeSpec(raw: Partial<SlideSpec> & Record<string, unknown>,
   else if ((g === "list" || g === "items") && !hasList && !(layout === "split-image" && content.image))
     finalLayout = content.stats?.length ? "stats" : "hero";
   else if (g === "quote" && !content.body) finalLayout = "hero";
+
+  // a video clip plays in the split-image media block (remocn scenes take pictures only)
+  if (finalLayout === "showcase" && content.image && opts.video) finalLayout = "split-image";
+  // a showcase slide is its remocn scene: make sure it has one — one that shows the user's picture when there is one
+  const needsMedia = !!content.image && !opts.video;
+  if (finalLayout === "showcase" && (!animations.scene || (needsMedia && !remocnAcceptsMedia(animations.scene))))
+    animations.scene =
+      remocnCandidates({ category: "scene", query: `${content.title ?? ""} ${content.subtitle ?? ""} ${brief.goal ?? ""}`, mood: opts.mood, seed: opts.index * 131 + 7, avoid: opts.avoid, limit: 1, media: needsMedia })[0]?.id ??
+      animations.scene;
 
   const amount = (content.bullets?.length ?? 0) + (content.items?.length ?? 0) + (content.stats?.length ?? 0);
   const rawDur = Number(raw.duration);
@@ -175,6 +193,7 @@ export function normalizeSpec(raw: Partial<SlideSpec> & Record<string, unknown>,
     items: content.items?.length ? content.items : undefined,
     stats: content.stats?.length ? content.stats : undefined,
     image: content.image,
+    images: content.image && content.images && content.images.length > 1 ? content.images : undefined,
     animations,
     style: (STYLES as readonly string[]).includes(raw.style as string) ? (raw.style as SlideSpec["style"]) : undefined,
     duration: Math.round(duration * 2) / 2,

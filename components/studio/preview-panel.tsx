@@ -237,7 +237,7 @@ export function PreviewPanel({ studio, registry, recent }: { studio: Studio; reg
                   <TooltipTrigger asChild>
                     <span className="flex items-center gap-1 rounded-md border bg-card/60 px-1.5 py-0.5">
                       <span className="text-muted-foreground">{slotName}</span>
-                      <FrameworkDot fw={id.split(".")[0] as Framework} />
+                      <FrameworkDot fw={(id ?? "").split(".")[0] as Framework} />
                       {meta?.name ?? id}
                     </span>
                   </TooltipTrigger>

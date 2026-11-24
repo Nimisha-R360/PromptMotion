@@ -34,8 +34,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     animations[slot as Slot] = compId;
   }
   let spec: SlideSpec = { ...slide.spec, animations, duration: parsed.data.duration ?? slide.spec.duration, style: parsed.data.style ?? slide.spec.style };
-  if (parsed.data.layout && parsed.data.layout !== spec.layout) {
-    spec = normalizeSpec({ ...spec, layout: parsed.data.layout } as never, { ...slide.brief, ...(slide.brief.locked ? {} : { layout: parsed.data.layout }) }, { index, mood: project.mood });
+  // a remocn scene ("Use it" in the library) is the whole slide: it needs the showcase layout
+  const layout = parsed.data.animations?.scene && !parsed.data.layout ? "showcase" : parsed.data.layout;
+  if (layout && layout !== spec.layout) {
+    // an uploaded clip keeps a slide on split-image — unless the user explicitly picked a scene for it
+    const video = !parsed.data.animations?.scene && project.media.find((m) => m.ref === slide.brief.image)?.kind === "video";
+    spec = normalizeSpec({ ...spec, layout } as never, { ...slide.brief, ...(slide.brief.locked ? {} : { layout }) }, { index, mood: project.mood, video });
     spec.animations = animations;
     spec.style = parsed.data.style ?? slide.spec.style;
   }

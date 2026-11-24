@@ -1,0 +1,338 @@
+"use client";
+
+import { loadFont as loadAnton } from "@remotion/google-fonts/Anton";
+import type React from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  AbsoluteFill,
+  continueRender,
+  delayRender,
+  Easing,
+  interpolate,
+} from "remotion";
+import { useSceneConfig, useSceneFrame } from "@/lib/remocn/frame-rate";
+import { useGlide } from "@/lib/remocn/glide";
+
+const anton = loadAnton("normal", { weights: ["400"], subsets: ["latin"] });
+
+export interface SlimCountProps {
+  value?: number;
+  from?: number;
+  decimals?: number;
+  prefix?: string;
+  suffix?: string;
+  label?: string;
+  accent?: string;
+  /** Text color of the outline and label; overrides the theme ink. */
+  ink?: string;
+  background?: string;
+  /** Typeface for the number and label. Load it yourself; Anton by default. */
+  fontFamily?: string;
+  /** Frames the count takes from `from` to `value`. */
+  countDuration?: number;
+  /** Frames between label words. */
+  stagger?: number;
+  /** Size of the number and label, around the frame's center. */
+  scale?: number;
+  /** Frames to hold the first frame before anything moves. */
+  delay?: number;
+  speed?: number;
+  theme?: "dark" | "light";
+}
+
+const THEMES = {
+  dark: {
+    bg: "#1B2A6B",
+    ink: "#F3E9D2",
+  },
+  light: {
+    bg: "#F3E9D2",
+    ink: "#1B2A6B",
+  },
+} as const;
+
+const RISE_LEN = 16;
+const LABEL_AT = 6;
+const COUNT_AT = 24;
+const COUNT_END = 84;
+const WAVE_POINTS = 48;
+
+const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1);
+const EASE_COUNT = Easing.bezier(0.42, 0, 0.12, 1);
+const CLAMP = {
+  extrapolateLeft: "clamp",
+  extrapolateRight: "clamp",
+} as const;
+
+interface Metrics {
+  baseline: number;
+  cap: number;
+}
+
+function format(v: number, decimals: number) {
+  return v.toLocaleString("en-US", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+function measure(fontFamily: string): Metrics {
+  let baseline = 0.8;
+  let cap = 0.72;
+  const canvas = document.createElement("canvas");
+  canvas.width = 400;
+  canvas.height = 400;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    ctx.font = `400 200px "${fontFamily}"`;
+    const fm = ctx.measureText("0123456789");
+    const asc = fm.fontBoundingBoxAscent / 200;
+    const desc = fm.fontBoundingBoxDescent / 200;
+    baseline = (1 - (asc + desc)) / 2 + asc;
+    cap = fm.actualBoundingBoxAscent / 200;
+  }
+  return { baseline, cap };
+}
+
+function useMetrics(fontFamily: string) {
+  const [m, setM] = useState<Metrics | null>(null);
+  const [handle] = useState(() => delayRender("slim-count: measuring"));
+  const released = useRef(false);
+  useEffect(() => {
+    let live = true;
+    Promise.all([
+      anton.waitUntilDone(),
+      document.fonts.load(`400 100px "${fontFamily}"`),
+    ])
+      .catch(() => undefined)
+      .then(() => {
+        if (!live) return;
+        setM(measure(fontFamily));
+        if (!released.current) {
+          released.current = true;
+          continueRender(handle);
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [handle, fontFamily]);
+  return m;
+}
+
+function digitCount(v: number, decimals: number) {
+  return Array.from(format(v, decimals)).length;
+}
+
+// The rises ease out hard, so their tails are tested frame to frame on the
+// px they travel rather than on a progress.
+const stirs = (at: (f: number) => number, f: number, step: number) =>
+  Math.abs(at(f + step) - at(f)) > 1e-3 ||
+  Math.abs(at(f) - at(f - step)) > 1e-3;
+
+/** The foreground at `scale`, around the frame's center; nothing extra at 1. */
+function ScaleLayer({
+  scale,
+  children,
+}: {
+  scale: number;
+  children: React.ReactNode;
+}) {
+  if (scale === 1) return children;
+  return (
+    <AbsoluteFill style={{ transform: `scale(${scale})` }}>
+      {children}
+    </AbsoluteFill>
+  );
+}
+
+export function SlimCount({
+  value = 0,
+  from = 100,
+  decimals = 0,
+  prefix = "",
+  suffix = "",
+  label = "Keyframes left to set by hand",
+  accent,
+  ink,
+  background,
+  fontFamily = anton.fontFamily,
+  countDuration = COUNT_END - COUNT_AT,
+  stagger = 3,
+  scale = 1,
+  delay = 0,
+  speed = 1,
+  theme = "dark",
+}: SlimCountProps) {
+  const glide = useGlide();
+  const t = Math.max(0, useSceneFrame() - delay) * speed;
+  const { width: W, height: H } = useSceneConfig();
+  const c = THEMES[theme];
+  const fg = ink ?? c.ink;
+  const fill = accent ?? fg;
+  const m = useMetrics(fontFamily);
+
+  const transparent = background === "transparent";
+  const stage = transparent ? "transparent" : (background ?? c.bg);
+
+  if (!m) {
+    return (
+      <div style={{ position: "absolute", inset: 0, background: stage }} />
+    );
+  }
+
+  const progress = (f: number) =>
+    interpolate(f, [COUNT_AT, COUNT_AT + countDuration], [0, 1], {
+      ...CLAMP,
+      easing: EASE_COUNT,
+    });
+  const k = progress(t);
+  const v = from + (value - from) * k;
+  const q = 10 ** decimals;
+  const text = `${prefix}${format(Math.round(v * q) / q, decimals)}${suffix}`;
+
+  const portrait = H > W * 1.1;
+  const M = Math.min(W, H) * (portrait ? 0.08 : 0.075);
+  const chars =
+    Math.max(digitCount(from, decimals), digitCount(value, decimals)) +
+    Array.from(prefix + suffix).length;
+  const F = Math.min(
+    (H * (portrait ? 0.4 : 0.74)) / m.cap,
+    (W * (portrait ? 0.84 : 0.58)) / Math.max(0.5, chars * 0.47),
+  );
+  const capPx = m.cap * F;
+  const baseY = portrait ? H - M * 2.2 : H / 2 + capPx / 2 + H * 0.04;
+  const boxTop = baseY - m.baseline * F;
+  const baseLocal = m.baseline * F;
+
+  const level = 1 - k;
+  const surge = Math.abs(progress(t + 1) - progress(t - 1)) * 20;
+  const amp = capPx * (0.006 + Math.min(0.03, surge * 0.02));
+  const phase = (t / 30) * Math.PI * 2 * 0.7;
+  const levelY =
+    baseLocal -
+    (capPx + capPx * 0.06) * level +
+    (level >= 0.999 ? -amp * 3 : 0);
+  const pts: string[] = [];
+  for (let i = 0; i <= WAVE_POINTS; i++) {
+    const u = i / WAVE_POINTS;
+    const y = levelY + amp * Math.sin(u * Math.PI * 2 * 2.2 + phase);
+    pts.push(`${(u * 100).toFixed(2)}% ${y.toFixed(2)}px`);
+  }
+  const clip =
+    level <= 0.0005
+      ? "inset(100% 0 0 0)"
+      : `polygon(${pts.join(", ")}, 100% 100%, 0% 100%)`;
+
+  const riseAt = (f: number) =>
+    interpolate(f, [0, RISE_LEN], [0, 1], {
+      ...CLAMP,
+      easing: EASE_OUT,
+    });
+  const rise = riseAt(t);
+  const strokeW = Math.max(2, F * 0.011);
+  const labelSize = portrait ? W * 0.1 : H * 0.094;
+  const words = label ? label.split(" ") : [];
+
+  const numberStyle = {
+    position: "absolute" as const,
+    right: 0,
+    top: 0,
+    height: F,
+    lineHeight: `${F}px`,
+    whiteSpace: "pre" as const,
+    fontFamily,
+    fontWeight: 400,
+    fontSize: F,
+    letterSpacing: "0.005em",
+    fontVariantNumeric: "tabular-nums",
+  };
+
+  return (
+    <AbsoluteFill style={{ background: stage, overflow: "hidden" }}>
+      <ScaleLayer scale={scale}>
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            width: W,
+            top: baseY - capPx - F * 0.1,
+            height: capPx + F * 0.16,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              right: M,
+              left: 0,
+              top: boxTop - (baseY - capPx - F * 0.1),
+              height: F,
+              transform: `translateY(${((1 - rise) * capPx * 1.15).toFixed(2)}px)${glide(stirs((f) => riseAt(f) * capPx * 1.15, t, speed))}`,
+            }}
+          >
+            <div
+              style={{
+                ...numberStyle,
+                color: fill,
+                clipPath: clip,
+              }}
+            >
+              {text}
+            </div>
+            <div
+              style={{
+                ...numberStyle,
+                color: "transparent",
+                WebkitTextStroke: `${strokeW.toFixed(2)}px ${fg}`,
+              }}
+            >
+              {text}
+            </div>
+          </div>
+        </div>
+        {label ? (
+          <div
+            style={{
+              position: "absolute",
+              left: M,
+              top: M,
+              width: portrait ? W - M * 2 : W * 0.34,
+              fontFamily,
+              fontWeight: 400,
+              fontSize: labelSize,
+              lineHeight: 1.02,
+              letterSpacing: "0.005em",
+              color: fg,
+            }}
+          >
+            {words.map((w, i) => {
+              const wordAt = (f: number) =>
+                interpolate(
+                  f,
+                  [LABEL_AT + i * stagger, LABEL_AT + i * stagger + 16],
+                  [0, 1],
+                  { ...CLAMP, easing: EASE_OUT },
+                );
+              const p = wordAt(t);
+              return (
+                <span key={`${w}-${i}`}>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      opacity: p,
+                      transform: `translateY(${((1 - p) * labelSize * 0.5).toFixed(2)}px)${glide(stirs((f) => wordAt(f) * labelSize * 0.5, t, speed))}`,
+                    }}
+                  >
+                    {w}
+                  </span>
+                  {i < words.length - 1 ? " " : ""}
+                </span>
+              );
+            })}
+          </div>
+        ) : null}
+      </ScaleLayer>
+    </AbsoluteFill>
+  );
+}

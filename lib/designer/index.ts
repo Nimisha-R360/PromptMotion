@@ -1,9 +1,10 @@
 import "server-only";
 import { chatJson, LlmUnavailableError } from "@/lib/llm";
 import { THEMES } from "@/runtime/themes";
-import { LAYOUTS, STYLES, type Layout, type SlideSpec } from "@/runtime/types";
-import { MOODS, type Mood, type Project, type SlideBrief } from "@/lib/types";
-import { DESIGNER_SYSTEM, GROUP_LAYOUTS, LAYOUT_GROUP, designOnlySchema, outlineSchema, slideSchema, slotsFor } from "./schema";
+import { LAYOUTS, SLOT_CATEGORY, STYLES, type Layout, type SlideSpec, type Slot } from "@/runtime/types";
+import { remocnCandidates } from "@/runtime/remocn/registry";
+import { MOODS, type MediaAsset, type Mood, type Project, type SlideBrief } from "@/lib/types";
+import { DESIGNER_SYSTEM, GROUP_LAYOUTS, LAYOUT_GROUP, designOnlySchema, outlineSchema, slideSchema, slotsFor, type ExtraIds } from "./schema";
 import { compatibleLayouts, engineForIndex, normalizeSpec, pickAnimations } from "./normalize";
 
 export type Progress = (info: { tokens: number; stage: string }) => void;
@@ -17,7 +18,7 @@ export interface OutlineResult {
   warning?: string;
 }
 
-const ENGINE_NAME = { gsap: "GSAP", anime: "anime.js", motion: "Motion", remotion: "Remotion" } as const;
+const ENGINE_NAME = { gsap: "GSAP", anime: "anime.js", motion: "Motion", remotion: "Remotion", remocn: "remocn" } as const;
 
 // ───────────────────────── outline (prompt mode) ─────────────────────────
 
@@ -39,21 +40,27 @@ export async function generateOutline(project: Project, feedback: string | undef
     `"goal" = what the slide must communicate, including the concrete facts/numbers from the request.`,
     `Pick a visual theme id and a mood that suit the topic. Theme ids are only visual styles: never mention them in titles or goals.`,
     `Theme ids: ${themeIds.join(", ")}.`,
-  ].join("\n");
+  ];
+  const media = project.media ?? [];
+  if (media.length)
+    user.push(
+      `\nUPLOADED MEDIA (the user's own pictures / video clips — each one must be presented on a slide):`,
+      ...media.map((m, i) => `${i + 1}. ${m.name} (${m.kind})`),
+      `Set "media" on a slide to the number of the file it presents (0 = none); write that slide's title and goal about what the file shows, following the request.`,
+    );
   try {
-    const out = await chatJson<{ title: string; theme: string; mood: Mood; slides: { layout: Layout; title: string; goal: string }[] }>({
+    const out = await chatJson<{ title: string; theme: string; mood: Mood; slides: { layout: Layout; title: string; goal: string; media?: number }[] }>({
       system: DESIGNER_SYSTEM,
-      user,
-      schema: outlineSchema(count, themeIds),
+      user: user.join("\n"),
+      schema: outlineSchema(count, themeIds, media.length),
       maxTokens: 900,
       temperature: 0.6,
       onProgress: (tokens) => onProgress?.({ tokens, stage: "outline" }),
     });
-    const briefs = (out.slides ?? [])
-      .filter((s) => s?.title)
-      .slice(0, 12)
-      .map((s) => ({ layout: (LAYOUTS as readonly string[]).includes(s.layout) ? s.layout : "title-bullets", title: s.title.trim(), goal: s.goal?.trim() }));
+    const slides = (out.slides ?? []).filter((s) => s?.title).slice(0, 12);
+    const briefs: SlideBrief[] = slides.map((s) => ({ layout: (LAYOUTS as readonly string[]).includes(s.layout) ? s.layout : "title-bullets", title: s.title.trim(), goal: s.goal?.trim() }));
     if (briefs.length < 2) throw new Error("outline too short");
+    placeMediaInOutline(briefs, media, slides.map((s) => Number(s.media) || 0));
     return {
       title: out.title?.trim() || project.title,
       theme: themeIds.includes(out.theme) ? out.theme : "midnight",
@@ -63,7 +70,43 @@ export async function generateOutline(project: Project, feedback: string | undef
     };
   } catch (e) {
     if (!(e instanceof LlmUnavailableError)) console.error("[outline] LLM failed, using fallback", e);
-    return { ...fallbackOutline(project.prompt), usedLlm: false, warning: (e as Error).message };
+    const fb = fallbackOutline(project.prompt);
+    placeMediaInOutline(fb.briefs, project.media ?? [], []);
+    return { ...fb, usedLlm: false, warning: (e as Error).message };
+  }
+}
+
+/**
+ * Put every uploaded image / clip on a slide: the model's picks first (`picked[i]` = 1-based media number for slide i),
+ * then the rest on content slides that have none (hero/closing last); leftovers join a slide's picture set.
+ * A slide with a picture becomes a "showcase" (remocn scene that shows it) unless it is already split-image;
+ * a video clip plays in the split-image media block.
+ */
+export function placeMediaInOutline(briefs: SlideBrief[], media: MediaAsset[], picked: number[]) {
+  if (!media.length || !briefs.length) return;
+  const used = new Set<number>();
+  picked.forEach((n, i) => {
+    if (briefs[i] && n >= 1 && n <= media.length && !used.has(n - 1) && !briefs[i].image) {
+      briefs[i].image = media[n - 1].ref;
+      used.add(n - 1);
+    }
+  });
+  const order = briefs.map((_, i) => i).sort((a, b) => Number(a === 0 || a === briefs.length - 1) - Number(b === 0 || b === briefs.length - 1) || a - b);
+  let k = 0;
+  media.forEach((m, mi) => {
+    if (used.has(mi)) return;
+    const free = order.find((i) => !briefs[i].image);
+    if (free !== undefined) briefs[free].image = m.ref;
+    else {
+      const b = briefs[order[k++ % order.length]];
+      b.images = [...(b.images ?? [b.image!]), m.ref];
+    }
+  });
+  const kind = new Map(media.map((m) => [m.ref, m.kind]));
+  for (const b of briefs) {
+    if (!b.image) continue;
+    if (kind.get(b.image) === "video") b.layout = "split-image";
+    else if (b.layout !== "split-image") b.layout = "showcase";
   }
 }
 
@@ -102,6 +145,7 @@ const LAYOUT_KEYWORDS: [RegExp, Layout][] = [
   [/\b(timeline|steps|process|roadmap)\b/i, "timeline"],
   [/\b(quote|testimonial)\b/i, "quote"],
   [/\b(image|picture|photo|split)\b/i, "split-image"],
+  [/\b(showcase|mockup|mock-up|app ui|product demo|ui scene|remocn scene)\b/i, "showcase"],
   [/\b(bullet|bullets|list)\b/i, "title-bullets"],
   [/\b(hero|cover|title slide)\b/i, "hero"],
   [/\b(closing|thank you|cta|call to action|ending)\b/i, "closing"],
@@ -144,13 +188,21 @@ export async function generateSlide(project: Project, index: number, feedback: s
   const prefer = engineForIndex(index + (slide.revision ?? 0));
 
   // Feedback may ask for a different layout explicitly.
-  const wanted = layoutFromFeedback(feedback);
+  let wanted = layoutFromFeedback(feedback);
+  // with the user's media on the slide, "image/photo" in the feedback names that media, not the split-image layout
+  if (brief.image && wanted === "split-image" && !/\bsplit\b/i.test(feedback ?? "")) wanted = undefined;
+  // the user's uploaded picture / clip on this slide (shown by a remocn scene, or a video in the split-image media block)
+  const mediaInfo = brief.image ? project.media?.find((m) => m.ref === brief.image) : undefined;
+  const video = mediaInfo?.kind === "video";
   let allowed: Layout[];
   if (brief.locked) {
     allowed = compatibleLayouts(brief, index, total);
+    if (video) allowed = allowed.filter((l) => l !== "showcase");
     if (wanted && allowed.includes(wanted)) allowed = [wanted];
   } else {
-    const layout = wanted ?? prevSpec?.layout ?? brief.layout ?? "title-bullets";
+    let layout = wanted ?? prevSpec?.layout ?? brief.layout ?? "title-bullets";
+    // a slide with the user's media must use a layout that presents it
+    if (brief.image && (video ? layout !== "split-image" : layout !== "split-image" && layout !== "showcase")) layout = video ? "split-image" : "showcase";
     brief.layout = layout;
     allowed = GROUP_LAYOUTS(LAYOUT_GROUP[layout]);
   }
@@ -159,7 +211,7 @@ export async function generateSlide(project: Project, index: number, feedback: s
   // hard: the rejected design's own picks (the user asked for change); soft: the neighbour's title/transition.
   const hardAvoid = new Set<string>();
   if (prevSpec && feedback && !KEEP_RE.test(feedback)) {
-    for (const s of slotsFor(prevSpec.layout)) hardAvoid.add(prevSpec.animations[s]);
+    for (const s of slotsFor(prevSpec.layout)) if (prevSpec.animations[s]) hardAvoid.add(prevSpec.animations[s]!);
   }
   const avoid = new Set<string>(hardAvoid);
   if (neighbour) avoid.add(neighbour.animations.title).add(neighbour.animations.transition);
@@ -194,6 +246,38 @@ export async function generateSlide(project: Project, index: number, feedback: s
     );
   }
   ask.push(`Engine focus for this slide: use ${ENGINE_NAME[prefer]} for at least two slots and mix in the others.`);
+
+  // remocn: a short list of relevant components per slot (the full registry is far too large for the prompt)
+  const used = new Set(allowed.flatMap(slotsFor));
+  const query = [project.prompt, brief.title, brief.goal, brief.subtitle, feedback].filter(Boolean).join(" ");
+  const extra: ExtraIds = {};
+  const lines: string[] = [];
+  for (const [slot, limit] of [["title", 4], ["background", 4], ["decor", 2], ["scene", 6]] as [Slot, number][]) {
+    if (!used.has(slot)) continue;
+    const picks = remocnCandidates({
+      category: SLOT_CATEGORY[slot],
+      query,
+      mood: project.mood,
+      limit,
+      seed: index * 7919 + (slide.revision ?? 0) * 31 + 1,
+      avoid: [...avoid],
+      // the scene must be able to show the user's uploaded picture
+      media: slot === "scene" && !!brief.image && !video,
+    });
+    extra[slot] = picks.map((c) => c.id);
+    lines.push(...picks.map((c) => `- ${c.id} (animations.${slot}): ${c.description} [${c.mood.join(",")}]`));
+  }
+  if (lines.length) {
+    ask.push(`REMOCN COMPONENTS you may also use (React/Remotion, from remocn.dev):\n${lines.join("\n")}`);
+    if (/\bremocn\b/i.test(`${feedback ?? ""} ${project.prompt ?? ""}`)) ask.push(`The user asked for remocn: use REMOCN COMPONENTS for every slot that has one.`);
+  }
+  if (brief.image && mediaInfo)
+    ask.push(
+      video
+        ? `This slide presents the user's uploaded video clip "${mediaInfo.name}" in its media block: write the text around what the clip shows.`
+        : `This slide presents the user's uploaded image "${mediaInfo.name}"${(brief.images?.length ?? 1) > 1 ? ` (+${brief.images!.length - 1} more)` : ""}` +
+            (allowed.includes("showcase") || brief.layout === "showcase" ? `: on a showcase slide pick a scene from REMOCN COMPONENTS (each one displays the image).` : ` in its media block.`),
+    );
   const avoidStyles = [neighbour?.style, prevSpec && feedback ? prevSpec.style : undefined].filter(Boolean);
   if (avoidStyles.length) ask.push(`Use a different "style" than: ${avoidStyles.join(", ")}.`);
   if (avoid.size) ask.push(`Do NOT use these components: ${[...avoid].join(", ")}.`);
@@ -212,7 +296,7 @@ export async function generateSlide(project: Project, index: number, feedback: s
     const raw = await chatJson<Partial<SlideSpec> & Record<string, unknown>>({
       system: DESIGNER_SYSTEM,
       user: `${context}\n\n${ask.join("\n")}`,
-      schema: editText ? designOnlySchema(allowed, true) : brief.locked ? designOnlySchema(allowed) : slideSchema(brief.layout as Layout),
+      schema: editText ? designOnlySchema(allowed, true, extra) : brief.locked ? designOnlySchema(allowed, false, extra) : slideSchema(brief.layout as Layout, extra),
       maxTokens: editText ? 550 : brief.locked ? 350 : 750,
       temperature: editText ? 0.4 : feedback ? 0.85 : 0.7,
       onProgress: (tokens) => onProgress?.({ tokens, stage: "slide" }),
@@ -222,13 +306,13 @@ export async function generateSlide(project: Project, index: number, feedback: s
       newBrief = applyContentEdit(brief, raw, feedback!);
       Object.assign(brief, newBrief);
     }
-    const spec = normalizeSpec(raw, brief, { index, mood: project.mood, avoid: [...avoid] });
+    const spec = normalizeSpec(raw, brief, { index, mood: project.mood, avoid: [...avoid], video });
     spec.style = varyStyle(spec.style, avoidStyles as string[], index + slide.revision);
     // the model ignores "avoid" sometimes — swap offending picks deterministically
     return { spec: enforceAvoid(spec, hardAvoid, project.mood, index), usedLlm: true, brief: newBrief };
   } catch (e) {
     if (!(e instanceof LlmUnavailableError)) console.error("[slide] LLM failed, using fallback", e);
-    return { spec: fallbackSlide(brief, index, total, project.mood, [...avoid], allowed, slide.revision), usedLlm: false, warning: (e as Error).message };
+    return { spec: fallbackSlide(brief, index, total, project.mood, [...avoid], allowed, slide.revision, video), usedLlm: false, warning: (e as Error).message };
   }
 }
 
@@ -255,16 +339,20 @@ function varyStyle(style: SlideSpec["style"], avoid: string[], seed: number): Sl
 }
 
 function enforceAvoid(spec: SlideSpec, avoid: Set<string>, mood: Mood, index: number): SlideSpec {
-  const bad = slotsFor(spec.layout).filter((s) => avoid.has(spec.animations[s]));
+  const bad = slotsFor(spec.layout).filter((s) => avoid.has(spec.animations[s] ?? ""));
   if (!bad.length) return spec;
   const alt = pickAnimations({ mood, seed: index * 977 + (Date.now() % 1000), prefer: engineForIndex(index + 1), avoid: [...avoid] });
   const animations = { ...spec.animations };
-  for (const s of bad) animations[s] = alt[s];
+  for (const s of bad)
+    animations[s] =
+      s === "scene"
+        ? (remocnCandidates({ category: "scene", query: spec.title, mood, seed: index * 977 + 3, avoid: [...avoid], limit: 1 })[0]?.id ?? animations.scene)
+        : alt[s]!;
   // the model's note may describe a component we replaced — keep the message truthful
   return { ...spec, animations, note: spec.note ? `${spec.note} (Swapped ${bad.join(", ")} for a fresh pick, since you asked for a change.)` : spec.note };
 }
 
-function fallbackSlide(brief: SlideBrief, index: number, total: number, mood: Mood, avoid: string[], allowed: Layout[], revision: number): SlideSpec {
+function fallbackSlide(brief: SlideBrief, index: number, total: number, mood: Mood, avoid: string[], allowed: Layout[], revision: number, video = false): SlideSpec {
   const layout = brief.locked ? allowed[revision % allowed.length] : (brief.layout ?? allowed[0]);
   const content: Partial<SlideSpec> = brief.locked
     ? {}
@@ -278,7 +366,7 @@ function fallbackSlide(brief: SlideBrief, index: number, total: number, mood: Mo
   const spec = normalizeSpec(
     { layout, ...content, animations: pickAnimations({ mood, seed: index * 31 + revision * 101 + 3, prefer: engineForIndex(index + revision), avoid }) } as Partial<SlideSpec> & Record<string, unknown>,
     { ...brief, layout },
-    { index, mood, avoid },
+    { index, mood, avoid, video },
   );
   spec.style = varyStyle(undefined, [], index * 2 + revision);
   spec.note = "Designed by the rule-based designer (local model unavailable).";

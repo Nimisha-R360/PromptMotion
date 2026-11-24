@@ -2,10 +2,10 @@ import "server-only";
 import { z } from "zod";
 import { Agent, Message, SlidingWindowConversationManager, SequentialToolExecutor, tool, type MessageData, type ToolContext } from "@strands-agents/sdk";
 import { DYNAMIC_MARKER, LocalGrammarModel } from "./model";
-import { ActionError, applyComponent, approveOutline, approveSlide, changeTheme, designSlide, editText, planOutline, splitSlide, type Reporter } from "@/lib/actions";
+import { ActionError, applyComponent, approveOutline, approveSlide, changeTheme, designSlide, editText, placeMedia, planOutline, splitSlide, type Reporter } from "@/lib/actions";
 import { addMessage, getAgentMemory, getProject, saveAgentMemory } from "@/lib/data/projects";
 import { LlmUnavailableError, type LlmPhase } from "@/lib/llm";
-import { COMPONENTS, getComponent } from "@/runtime/registry";
+import { ALL_COMPONENTS, COMPONENTS, getComponent } from "@/runtime/registry";
 import { SLOT_CATEGORY, type Slot } from "@/runtime/types";
 import { slotsFor } from "@/runtime/layouts";
 import { THEMES } from "@/runtime/themes";
@@ -47,12 +47,13 @@ Choose the tool:
 - feedback about how a slide looks (mood, layout, colours, energy, style) -> design_slide with that feedback
 - exact wording change ("change the title to ...", "add text ...", "remove the subtitle") -> edit_text
 - a specific animation, effect, background or transition -> apply_component
+- put one of the user's uploaded images or video clips (MEDIA in PROJECT STATE) on a slide -> place_media
 - colour theme of the whole video -> change_theme
 - too much content on one slide -> split_slide
 - any question ("why…", "what…", "which…", "how…", "can you…?") about the project, slides or the app -> answer_question, using PROJECT STATE to answer
 - only when an instruction is too vague to act on -> ask_user with one short question (never repeat the user's question back)
 Slides are numbered from 1. If the user gives no slide number, use the slide in view.
-App facts: 80 animation components (Remotion, anime.js, Motion, GSAP), 10 layouts, 6 visual styles, 8 themes; export as a video HTML file or an animated web page; desktop/tablet/mobile previews.`;
+App facts: 80 core animation components (Remotion, anime.js, Motion, GSAP) plus ~870 remocn components (React/Remotion text effects, shader backgrounds, animated icons and full-frame UI scenes for "showcase" slides), 11 layouts, 6 visual styles, 8 themes; export as a video HTML file or an animated web page; desktop/tablet/mobile previews.`;
 
 /** Compact, always-current project state (cheap context instead of long history). */
 export function stateBlock(p: Project, inView: number): string {
@@ -71,15 +72,20 @@ export function stateBlock(p: Project, inView: number): string {
   const detail = cur
     ? `slide ${inView + 1} details: layout ${cur.layout}, style ${cur.style ?? "auto"}, ${cur.duration}s; ` +
       slotsFor(cur.layout)
-        .map((s) => `${s}: ${getComponent(cur.animations[s])?.name ?? cur.animations[s]} (${cur.animations[s].split(".")[0]})`)
+        .map((s) => `${s}: ${getComponent(cur.animations[s] ?? "")?.name ?? cur.animations[s]} (${(cur.animations[s] ?? "").split(".")[0]})`)
         .join(", ") +
       (cur.note ? `; designer note: ${cur.note}` : "")
     : "";
+  const media = (p.media ?? []).map((m, i) => {
+    const on = p.slides.filter((s) => s.brief.image === m.ref || s.brief.images?.includes(m.ref)).map((s) => s.index + 1);
+    return ` ${i + 1}. ${m.name} (${m.kind}${on.length ? `, on slide ${on.join(", ")}` : ", not used yet"})`;
+  });
   return [
     `PROJECT STATE`,
     `title: ${p.title} | source: ${p.mode === "upload" ? "uploaded slides" : "prompt"} | theme: ${p.theme} | mood: ${p.mood}`,
     `stage: ${stage} | waiting for: ${waiting} | slide in view: ${inView + 1}`,
     p.slides.length ? `slides:\n${lines.join("\n")}` : "slides: none yet",
+    media.length ? `MEDIA uploaded by the user:\n${media.join("\n")}` : "",
     detail,
   ]
     .filter(Boolean)
@@ -192,7 +198,7 @@ function buildTools(projectId: string, ev: AgentEvents, r: Reporter, userMessage
     tool({
       name: "apply_component",
       description:
-        "Put a specific animation effect on a slide. slot: title (headline effect), body (entrance of text/image blocks), items (list stagger), number (counters), chart, background, decor (ornaments) or transition. effect: the user's words for it, e.g. 'scramble', 'typewriter', 'particles', 'iris'.",
+        "Put a specific animation effect on a slide. slot: title (headline effect), body (entrance of text/image blocks), items (list stagger), number (counters), chart, background, decor (ornaments or animated icon), transition, or scene (a full-frame remocn UI scene, e.g. 'terminal', 'github stars', 'pricing'). effect: the user's words for it, e.g. 'scramble', 'typewriter', 'particles', 'iris', 'remocn mesh gradient'.",
       inputSchema: z.object({
         slide: slideNo,
         slot: z.enum(Object.keys(SLOT_CATEGORY) as [Slot, ...Slot[]]),
@@ -200,6 +206,20 @@ function buildTools(projectId: string, ev: AgentEvents, r: Reporter, userMessage
       }),
       callback: async (i, ctx) => {
         const res = await guard("apply_component", i, () => applyComponent(projectId, idx(i.slide), resolveComponent(i.slot, i.effect), r));
+        if (res.ok) handBack(ctx, `slide ${i.slide}`);
+        return res;
+      },
+    }),
+    tool({
+      name: "place_media",
+      description:
+        "Put one of the user's uploaded images or video clips (listed under MEDIA) on a slide: the slide is redesigned around it with an animated remocn scene and text written from the user's request. media: the file name or its MEDIA number.",
+      inputSchema: z.object({ slide: slideNo, media: z.string(), feedback: z.string() }),
+      callback: async (i, ctx) => {
+        const res = await guard("place_media", i, async () => {
+          if (fresh().stage === "outline_review") approveOutline(projectId);
+          return placeMedia(projectId, idx(i.slide), [resolveMedia(fresh(), i.media)], groundFeedback(i.feedback, userMessage) || undefined, r);
+        });
         if (res.ok) handBack(ctx, `slide ${i.slide}`);
         return res;
       },
@@ -256,9 +276,9 @@ function buildTools(projectId: string, ev: AgentEvents, r: Reporter, userMessage
  * reliably, but it can copy the user's words.
  */
 export function resolveComponent(slot: Slot, effect: string): string {
-  const pool = COMPONENTS.filter((c) => c.category === SLOT_CATEGORY[slot]);
+  const pool = ALL_COMPONENTS.filter((c) => c.category === SLOT_CATEGORY[slot]);
   const words = effect.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !["the", "and", "effect", "animation", "use", "with"].includes(w));
-  const engine = /remotion/.test(effect.toLowerCase()) ? "remotion" : /anime/.test(effect.toLowerCase()) ? "anime" : /gsap|greensock/.test(effect.toLowerCase()) ? "gsap" : /motion|framer/.test(effect.toLowerCase()) ? "motion" : null;
+  const engine = /remocn/.test(effect.toLowerCase()) ? "remocn" : /remotion/.test(effect.toLowerCase()) ? "remotion" : /anime/.test(effect.toLowerCase()) ? "anime" : /gsap|greensock/.test(effect.toLowerCase()) ? "gsap" : /motion|framer/.test(effect.toLowerCase()) ? "motion" : null;
   let best: { id: string; score: number } | null = null;
   for (const c of pool) {
     const hay = `${c.id} ${c.name} ${c.description} ${c.uses.join(" ")} ${c.mood.join(" ")}`.toLowerCase();
@@ -266,9 +286,33 @@ export function resolveComponent(slot: Slot, effect: string): string {
     if (engine && c.framework === engine) score += 2;
     if (score > 0 && (!best || score > best.score)) best = { id: c.id, score };
   }
-  if (!best) throw new ActionError(`No ${slot} effect matches "${effect}". Options: ${pool.map((c) => c.name).join(", ")}.`);
+  if (!best) {
+    const core = COMPONENTS.filter((c) => c.category === SLOT_CATEGORY[slot]).map((c) => c.name);
+    throw new ActionError(`No ${slot} effect matches "${effect}". Options: ${core.length ? core.join(", ") + ", or a remocn effect by name" : "a remocn scene by name (e.g. terminal, github stars, pricing)"}.`);
+  }
   return best.id;
 }
+
+/** The user's words for an uploaded file ("2", "dashboard.png", "the screenshot") → its `asset:` ref (latest unused one by default). */
+export function resolveMedia(p: Project, words: string): string {
+  const media = p.media ?? [];
+  if (!media.length) throw new ActionError("No images or video clips have been uploaded to this project — attach one with the paperclip.");
+  const n = Number(words.trim().match(/^#?(\d{1,2})$/)?.[1]);
+  if (n >= 1 && n <= media.length) return media[n - 1].ref;
+  const w = words.toLowerCase();
+  const byName = media.find((m) => w.includes(m.name.toLowerCase()) || m.name.toLowerCase().includes(w.trim()) || w.includes(m.name.toLowerCase().replace(/\.[a-z0-9]+$/, "")));
+  if (byName && w.trim()) return byName.ref;
+  const kind = /\b(video|clip|movie|footage|recording)\b/.test(w) ? "video" : /\b(image|picture|photo|screenshot|logo|png|jpg)\b/.test(w) ? "image" : null;
+  const pool = media.filter((m) => !kind || m.kind === kind);
+  const unused = pool.filter((m) => !p.slides.some((s) => s.brief.image === m.ref || s.brief.images?.includes(m.ref)));
+  return (unused.at(-1) ?? pool.at(-1) ?? media.at(-1)!).ref;
+}
+
+/** "slide 3" / "3rd slide" in a message → 0-based index */
+const slideFromMessage = (m: string) => {
+  const n = Number(m.match(/\bslide\s*#?(\d{1,2})\b/i)?.[1] ?? m.match(/\b(\d{1,2})(?:st|nd|rd|th)\s+slide\b/i)?.[1]);
+  return n >= 1 ? n - 1 : undefined;
+};
 
 /** Keep the memory window self-contained: it must start with a plain user message (no orphan tool results). */
 function trimMemory(messages: MessageData[]): MessageData[] {
@@ -307,13 +351,35 @@ async function fallbackTurn(project: Project, message: string, inView: number, r
 }
 
 /** One chat turn of the Director agent. Returns how the turn was handled. */
-export async function runAgentTurn(projectId: string, message: string, inView: number, ev: AgentEvents): Promise<{ via: "agent" | "fallback"; tools: string[] }> {
+export async function runAgentTurn(
+  projectId: string,
+  message: string,
+  inView: number,
+  ev: AgentEvents,
+  /** `asset:` refs the user attached to this message (images / video clips) */
+  attached: string[] = [],
+): Promise<{ via: "agent" | "fallback"; tools: string[] }> {
   const project = getProject(projectId);
   if (!project) throw new ActionError("Project not found");
   const view = Math.min(Math.max(0, inView), Math.max(0, project.slides.length - 1));
   const r: Reporter = { status: ev.status };
   const used: string[] = [];
   const events: AgentEvents = { status: ev.status, tool: (name, args) => (used.push(name), ev.tool(name, args)) };
+
+  // Attachments are acted on directly (no tool choice for the small model to get wrong): before the outline is
+  // approved they shape the outline (every file gets a slide); afterwards they go on the slide named or in view.
+  if (attached.length) {
+    if (project.mode === "prompt" && (project.stage === "outline" || project.stage === "outline_review")) {
+      events.tool("plan_outline", { media: attached.length });
+      await planOutline(projectId, project.stage === "outline" ? undefined : message, r);
+      return { via: "agent", tools: used };
+    }
+    if (project.stage === "outline_review") approveOutline(projectId);
+    const at = Math.min(slideFromMessage(message) ?? view, project.slides.length - 1);
+    events.tool("place_media", { slide: at + 1, media: attached.length });
+    await placeMedia(projectId, at, attached, message, r);
+    return { via: "agent", tools: used };
+  }
 
   const memory = getAgentMemory(projectId) as MessageData[];
   let modelCalls = 0;

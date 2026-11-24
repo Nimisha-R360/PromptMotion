@@ -40,7 +40,19 @@ export interface LlmStatus {
   warm: boolean;
   /** what the model is doing right now (any tab / project) */
   activity: { projectId: string | null; phase: LlmPhase; label: string; startedAt: number } | null;
+  /** which model the agents run on */
+  provider?: LlmProvider;
 }
+
+export type LlmProvider = "local" | "anthropic" | "openai";
+export interface LlmSettings {
+  provider: LlmProvider;
+  anthropicModel: string;
+  openaiModel: string;
+  hasAnthropicKey: boolean;
+  hasOpenaiKey: boolean;
+}
+export type LlmSettingsPatch = Partial<{ provider: LlmProvider; anthropicApiKey: string; anthropicModel: string; openaiApiKey: string; openaiModel: string }>;
 
 export interface Registry {
   frameworks: FrameworkInfo[];
@@ -53,6 +65,9 @@ export interface Registry {
 export const api = {
   registry: () => fetch("/api/registry").then(json<Registry>),
   llm: () => fetch("/api/llm", { cache: "no-store" }).then(json<LlmStatus>),
+  llmSettings: () => fetch("/api/llm/settings", { cache: "no-store" }).then(json<LlmSettings>),
+  saveLlmSettings: (body: LlmSettingsPatch) =>
+    fetch("/api/llm/settings", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then(json<LlmSettings>),
   projects: () => fetch("/api/projects", { cache: "no-store" }).then(json<{ data: ProjectSummary[] }>),
   project: (id: string) => fetch(`/api/projects/${id}`, { cache: "no-store" }).then(json<Project>),
   create: (prompt: string) => post("/api/projects", { prompt }).then(json<Project>),
@@ -62,6 +77,12 @@ export const api = {
     if (instructions) fd.append("instructions", instructions);
     return fetch("/api/uploads", { method: "POST", body: fd }).then(json<Project>);
   },
+  /** attach images / video clips to a project (the agent places them on slides) */
+  attachMedia: (id: string, files: File[]) => {
+    const fd = new FormData();
+    files.forEach((f) => fd.append("files", f));
+    return fetch(`/api/projects/${id}/media`, { method: "POST", body: fd }).then(json<{ refs: string[]; project: Project }>);
+  },
   patch: (id: string, body: { title?: string; theme?: string; mood?: string }) =>
     fetch(`/api/projects/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then(json<Project>),
   remove: (id: string) => fetch(`/api/projects/${id}`, { method: "DELETE" }).then(json<void>),
@@ -70,6 +91,12 @@ export const api = {
   patchSlide: (id: string, index: number, body: { animations?: Record<string, string>; layout?: string; duration?: number; style?: string }) =>
     fetch(`/api/projects/${id}/slides/${index}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then(json<Project>),
 };
+
+/** images / video clips the chat can attach for the agent (other files are uploaded as a slide deck) */
+export const MEDIA_EXT = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".mp4", ".m4v", ".webm", ".mov"];
+export const isMediaFile = (f: File) => MEDIA_EXT.some((e) => f.name.toLowerCase().endsWith(e));
+/** URL of an uploaded media file (`asset:<id>`) for thumbnails */
+export const mediaUrl = (projectId: string, ref: string) => `/api/projects/${projectId}/media/${encodeURIComponent(ref.replace(/^asset:/, ""))}`;
 
 export interface StreamHandlers {
   onStatus?: (text: string, phase?: string) => void;

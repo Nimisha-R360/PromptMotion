@@ -36,5 +36,7 @@ function open() {
   return db;
 }
 
+// a dev server keeps its connection across reloads: still apply migrations added since it opened
+if (globalThis.__pmDb) migrate(globalThis.__pmDb);
 export const db = globalThis.__pmDb ?? open();
 if (process.env.NODE_ENV !== "production") globalThis.__pmDb = db;

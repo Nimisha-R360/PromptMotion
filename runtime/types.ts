@@ -1,6 +1,6 @@
 // Shared types between the Next.js server (LLM, composer) and the in-page player runtime.
 
-export type Framework = "remotion" | "anime" | "motion" | "gsap";
+export type Framework = "remotion" | "anime" | "motion" | "gsap" | "remocn";
 
 export type Category =
   | "text" // headline / title effects (split chars/words)
@@ -10,10 +10,11 @@ export type Category =
   | "chart" // data bars
   | "background" // full-bleed animated backdrop
   | "decor" // SVG shapes / ornaments
-  | "transition"; // scene-to-scene transition
+  | "transition" // scene-to-scene transition
+  | "scene"; // full-frame remocn scene (product UI, mockup, chart, template…) on a "showcase" slide
 
 /** Animation slots on a slide; each maps to one registry category. */
-export type Slot = "title" | "body" | "items" | "number" | "chart" | "background" | "decor" | "transition";
+export type Slot = "title" | "body" | "items" | "number" | "chart" | "background" | "decor" | "transition" | "scene";
 
 export const SLOT_CATEGORY: Record<Slot, Category> = {
   title: "text",
@@ -24,6 +25,7 @@ export const SLOT_CATEGORY: Record<Slot, Category> = {
   background: "background",
   decor: "decor",
   transition: "transition",
+  scene: "scene",
 };
 
 export const LAYOUTS = [
@@ -37,6 +39,7 @@ export const LAYOUTS = [
   "timeline",
   "quote",
   "closing",
+  "showcase",
 ] as const;
 export type Layout = (typeof LAYOUTS)[number];
 
@@ -51,6 +54,7 @@ export const LAYOUT_INFO: Record<Layout, string> = {
   timeline: "Title + 3-5 sequential steps (heading + text)",
   quote: "Large quotation (body) with author (subtitle)",
   closing: "Final call-to-action / thank-you slide",
+  showcase: "Full-frame animated remocn scene (app UI, device mockup, terminal, chat, chart, logo or product reveal) with a short title",
 };
 
 /** Per-slide visual treatment (cards, background tint, typography) — varies the look between slides. */
@@ -83,6 +87,8 @@ export interface SlideAnimations {
   background: string;
   decor: string;
   transition: string;
+  /** remocn scene component (showcase layout only) */
+  scene?: string;
 }
 
 export interface SlideSpec {
@@ -93,9 +99,11 @@ export interface SlideSpec {
   bullets?: string[];
   items?: Item[];
   stats?: Stat[];
-  /** image src: data URI / URL, or `asset:<id>` resolved server-side before render */
+  /** image src: data URI / URL, or `asset:<id>` resolved server-side before render (may also be a video clip) */
   image?: string;
   imageAlt?: string;
+  /** every uploaded picture placed on this slide (`image` is the first); fills remocn scenes that show several */
+  images?: string[];
   animations: SlideAnimations;
   /** visual treatment; when omitted the player rotates styles by slide index */
   style?: SlideStyle;

@@ -1,4 +1,5 @@
 import type { Category, Framework } from "./types";
+import { REMOCN_COMPONENTS } from "./remocn/registry";
 
 /**
  * Component registry: the single source of truth for every modular animation component.
@@ -17,6 +18,8 @@ export interface ComponentMeta {
   uses: string[];
   /** mood tags help the LLM / fallback designer pick */
   mood: ("calm" | "energetic" | "playful" | "elegant" | "techy" | "bold")[];
+  /** remocn: shows the user's uploaded image(s) (passed through its image props) */
+  media?: boolean;
 }
 
 export interface FrameworkInfo {
@@ -32,6 +35,7 @@ export const FRAMEWORKS: FrameworkInfo[] = [
   { id: "anime", name: "anime.js", version: "4.5", color: "#ff4b4b", description: "Lightweight timeline engine: animate(), stagger(), createTimeline(), splitText(), svg.createDrawable(), svg.morphTo(), createMotionPath()." },
   { id: "motion", name: "Motion (Framer)", version: "14", color: "#f5d90a", description: "Framer Motion's vanilla engine: animate(), stagger(), spring physics, hardware-accelerated WAAPI keyframes and value generators." },
   { id: "gsap", name: "GSAP", version: "3.15", color: "#0ae448", description: "GreenSock timelines plus plugins: SplitText, ScrambleText, TextPlugin, DrawSVG, MorphSVG, MotionPath, CustomEase." },
+  { id: "remocn", name: "remocn", version: "registry", color: "#ec4899", description: "remocn.dev registry of React/Remotion components (text effects, shader backgrounds, animated icons and full-frame UI scenes), rendered through the Remotion <Player>." },
 ];
 
 export interface Primitive {
@@ -187,12 +191,19 @@ export const COMPONENTS: ComponentMeta[] = [
   C("gsap.transition.skew-slide", "transition", "Skew Slide", "Skewed horizontal slide.", ["gsap.timeline()", "power3.inOut"], ["energetic", "techy"]),
 ];
 
-export const COMPONENT_IDS = new Set(COMPONENTS.map((c) => c.id));
+/**
+ * Core components (above) + the remocn components (runtime/remocn/registry.ts). The core list stays the static
+ * catalog of the designer prompt; remocn components are offered per slide as a relevant shortlist (see remocnCandidates).
+ */
+export const ALL_COMPONENTS: ComponentMeta[] = [...COMPONENTS, ...REMOCN_COMPONENTS];
+
+export const COMPONENT_IDS = new Set(ALL_COMPONENTS.map((c) => c.id));
 
 export function componentsByCategory(cat: Category): ComponentMeta[] {
   return COMPONENTS.filter((c) => c.category === cat);
 }
 
+const BY_ID = new Map(ALL_COMPONENTS.map((c) => [c.id, c]));
 export function getComponent(id: string): ComponentMeta | undefined {
-  return COMPONENTS.find((c) => c.id === id);
+  return BY_ID.get(id);
 }

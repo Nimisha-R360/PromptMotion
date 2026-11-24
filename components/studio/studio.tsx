@@ -24,12 +24,13 @@ export function Studio() {
   }, []);
   // poll faster while the model is busy or warming up so the status badge stays live
   const llmBusy = !!studio.busy || !!llm?.activity || (!!llm?.online && !llm.warm);
+  const [llmRefresh, setLlmRefresh] = useState(0);
   useEffect(() => {
     const poll = () => api.llm().then(setLlm).catch(() => setLlm({ online: false, model: null, url: "", warm: false, activity: null }));
     poll();
     const t = setInterval(poll, llmBusy ? 3000 : 15000);
     return () => clearInterval(t);
-  }, [llmBusy]);
+  }, [llmBusy, llmRefresh]);
   const projectKey = studio.project?.id + String(studio.project?.stage);
   useEffect(() => {
     api.projects().then((r) => setRecent(r.data)).catch(() => {});
@@ -56,7 +57,7 @@ export function Studio() {
           </>
         )}
         <div className="ml-auto flex items-center gap-2">
-          <ModelStatus llm={llm} busy={studio.busy} />
+          <ModelStatus llm={llm} busy={studio.busy} onSettingsSaved={() => setLlmRefresh((n) => n + 1)} />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">

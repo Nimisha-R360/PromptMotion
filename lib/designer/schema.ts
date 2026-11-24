@@ -8,11 +8,15 @@ import { LAYOUT_GROUP, GROUP_LAYOUTS, slotsFor } from "@/runtime/layouts";
 
 const idsFor = (slot: Slot) => componentsByCategory(SLOT_CATEGORY[slot]).map((c) => c.id);
 
-function animationsSchema(slots: Slot[]) {
+/** Extra (remocn) component ids offered for this slide, per slot — see remocnCandidates(). */
+export type ExtraIds = Partial<Record<Slot, string[]>>;
+
+function animationsSchema(slots: Slot[], extra: ExtraIds = {}) {
+  const enums = slots.map((s) => [s, [...idsFor(s), ...(extra[s] ?? [])]] as const).filter(([, ids]) => ids.length);
   return {
     type: "object",
-    properties: Object.fromEntries(slots.map((s) => [s, { type: "string", enum: idsFor(s) }])),
-    required: slots,
+    properties: Object.fromEntries(enums.map(([s, ids]) => [s, { type: "string", enum: ids }])),
+    required: enums.map(([s]) => s),
   };
 }
 
@@ -46,11 +50,13 @@ function contentProps(layout: Layout): Record<string, unknown> {
       };
     case "quote":
       return { body: str, subtitle: str };
+    case "showcase":
+      return { subtitle: str };
   }
 }
 
 /** Prompt mode: the model writes content + picks components for one slide. */
-export function slideSchema(layout: Layout) {
+export function slideSchema(layout: Layout, extra: ExtraIds = {}) {
   const content = contentProps(layout);
   const slots = slotsFor(layout);
   return {
@@ -60,7 +66,7 @@ export function slideSchema(layout: Layout) {
       title: str,
       ...content,
       style: { type: "string", enum: [...STYLES] },
-      animations: animationsSchema(slots),
+      animations: animationsSchema(slots, extra),
       duration: { type: "integer" },
       note: str,
     },
@@ -72,7 +78,7 @@ export function slideSchema(layout: Layout) {
  * Upload mode: content is fixed, the model only designs (layout + components).
  * With `editableText`, the model also returns the slide text with the user's requested edit applied.
  */
-export function designOnlySchema(layouts: Layout[], editableText = false) {
+export function designOnlySchema(layouts: Layout[], editableText = false, extra: ExtraIds = {}) {
   const slots = Array.from(new Set(layouts.flatMap(slotsFor)));
   const text = editableText ? { title: str, subtitle: str, body: str, bullets: { type: "array", items: str, maxItems: 6 } } : {};
   return {
@@ -81,7 +87,7 @@ export function designOnlySchema(layouts: Layout[], editableText = false) {
       ...text,
       layout: { type: "string", enum: layouts },
       style: { type: "string", enum: [...STYLES] },
-      animations: animationsSchema(slots),
+      animations: animationsSchema(slots, extra),
       duration: { type: "integer" },
       note: str,
     },
@@ -89,7 +95,7 @@ export function designOnlySchema(layouts: Layout[], editableText = false) {
   };
 }
 
-export function outlineSchema(count?: number, themes: string[] = THEMES.map((t) => t.id)) {
+export function outlineSchema(count?: number, themes: string[] = THEMES.map((t) => t.id), mediaCount = 0) {
   return {
     type: "object",
     properties: {
@@ -102,8 +108,14 @@ export function outlineSchema(count?: number, themes: string[] = THEMES.map((t) 
         maxItems: count ?? 8,
         items: {
           type: "object",
-          properties: { layout: { type: "string", enum: [...LAYOUTS] }, title: str, goal: str },
-          required: ["layout", "title", "goal"],
+          properties: {
+            layout: { type: "string", enum: [...LAYOUTS] },
+            title: str,
+            goal: str,
+            // number of the uploaded image/clip this slide presents (0 = none)
+            ...(mediaCount ? { media: { type: "integer", enum: Array.from({ length: mediaCount + 1 }, (_, i) => i) } } : {}),
+          },
+          required: mediaCount ? ["layout", "title", "goal", "media"] : ["layout", "title", "goal"],
         },
       },
     },
@@ -120,11 +132,12 @@ const SLOT_LABEL: Record<Slot, string> = {
   background: "animations.background — full-frame animated backdrop",
   decor: "animations.decor — SVG ornaments around the edges",
   transition: "animations.transition — how this slide enters from the previous one",
+  scene: "animations.scene — the full-frame remocn scene of a showcase slide (choose from REMOCN COMPONENTS in the request)",
 };
 
 /** Static system prompt (kept identical across calls so llama.cpp reuses its KV cache). */
 export const DESIGNER_SYSTEM = `You are Prompt Motion, a senior motion designer. You turn ideas into short animated videos made of slides.
-Each slide is built ONLY from modular animation components of four engines: Remotion, anime.js, Motion (Framer) and GSAP.
+Each slide is built ONLY from modular animation components of four engines: Remotion, anime.js, Motion (Framer) and GSAP, plus remocn (a registry of React/Remotion components offered per slide).
 Always answer with JSON that matches the provided schema. No markdown.
 
 WRITING RULES
@@ -155,4 +168,5 @@ ${(Object.keys(SLOT_LABEL) as Slot[])
 DESIGN RULES
 - Match components to the mood. Mix engines on a slide, it makes the motion richer.
 - Keep backgrounds subtle for text-heavy slides; bolder backgrounds suit hero/closing slides.
-- Do not repeat the previous slide's title effect, transition or style — every slide should look visibly different.`;
+- Do not repeat the previous slide's title effect, transition or style — every slide should look visibly different.
+- REMOCN COMPONENTS (when the request lists them) are richer React/Remotion effects: use one when it fits the slide well, and always when the user asks for remocn or for exactly that effect.`;

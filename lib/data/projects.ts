@@ -1,6 +1,7 @@
 import "server-only";
 import { nanoid } from "nanoid";
 import { db } from "@/lib/db";
+import { listMedia } from "@/lib/assets";
 import type { SlideSpec } from "@/runtime/types";
 import type { Message, Mood, Project, ProjectMode, ProjectStage, ProjectSummary, Slide, SlideBrief, SlideStatus } from "@/lib/types";
 
@@ -106,6 +107,7 @@ export function getProject(id: string): Project | null {
     updatedAt: p.updated_at,
     slides: (stmt.slides.all(id) as SlideRow[]).map(mapSlide),
     messages: (stmt.messages.all(id) as MessageRow[]).map(mapMessage),
+    media: listMedia(id),
   };
 }
 

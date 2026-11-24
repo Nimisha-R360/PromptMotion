@@ -113,11 +113,11 @@ export function useStudio() {
 
   /** One chat turn handled by the Director agent (Strands): it picks and runs the tools, then waits for the user. */
   const runAgent = useCallback(
-    async (p: Project, message: string, slide: number, record = true) => {
+    async (p: Project, message: string, slide: number, record = true, media?: string[]) => {
       const res = await run(
-        { kind: "agent", status: "Understanding your request…", phase: "thinking" },
+        { kind: "agent", status: media?.length ? "Placing your media…" : "Understanding your request…", phase: "thinking" },
         `/api/projects/${p.id}/agent`,
-        { message, slide, record, projectId: p.id },
+        { message, slide, record, projectId: p.id, ...(media?.length ? { media } : {}) },
       );
       if (res) {
         setPreviewIndex(res.currentIndex);
@@ -154,13 +154,16 @@ export function useStudio() {
         setProject(p);
         setPreviewIndex(0);
         router.replace(`/?p=${p.id}`);
+        setBusy(null);
+        // images / clips sent with a request: the agent plans the video around them and writes the text from the request
+        if (p.mode === "prompt" && p.stage === "outline" && instructions) await runAgent(p, instructions, 0, false, p.media.map((m) => m.ref));
       } catch (e) {
         toast.error((e as Error).message);
       } finally {
         setBusy(null);
       }
     },
-    [router],
+    [router, runAgent],
   );
 
   const approveOutline = useCallback(async () => {
@@ -197,10 +200,26 @@ export function useStudio() {
 
   const redesign = useCallback((index: number, feedback: string) => project && generate(project, index, feedback || "Try a noticeably different design."), [project, generate]);
 
-  /** Chat input dispatcher: meaning depends on the workflow stage. */
+  /** Chat input dispatcher: meaning depends on the workflow stage. `media`: images / video clips attached to the message. */
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, media: File[] = []) => {
       const t = text.trim();
+      if (media.length) {
+        if (!project) return upload(media, t || undefined);
+        setBusy({ kind: "upload", status: `Uploading ${media.length > 1 ? `${media.length} files` : media[0].name}…`, tokens: 0, startedAt: Date.now() });
+        let refs: string[];
+        try {
+          const res = await api.attachMedia(project.id, media);
+          refs = res.refs;
+          setProject(res.project);
+        } catch (e) {
+          toast.error((e as Error).message);
+          setBusy(null);
+          return;
+        }
+        setBusy(null);
+        return runAgent(project, t || `Use the attached ${media.length > 1 ? "files" : "file"} on slide ${previewIndex + 1}`, previewIndex, true, refs);
+      }
       if (!t) return;
       if (!project) return start(t);
       if (isNewVideoRequest(t)) {
@@ -215,7 +234,7 @@ export function useStudio() {
       // everything else is understood and acted on by the Director agent
       return runAgent(project, t, previewIndex);
     },
-    [project, start, approveOutline, approveSlide, runAgent, previewIndex],
+    [project, start, upload, approveOutline, approveSlide, runAgent, previewIndex],
   );
 
   const applyComponent = useCallback(

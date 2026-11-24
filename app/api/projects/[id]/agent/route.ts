@@ -14,6 +14,8 @@ const Body = z.object({
   slide: z.number().int().min(0).optional(),
   /** false when the message is already in the chat (e.g. the prompt that created the project) */
   record: z.boolean().optional(),
+  /** `asset:` refs of images / video clips attached to this message (uploaded via /media first) */
+  media: z.array(z.string().regex(/^asset:[\w-]+$/)).max(20).optional(),
 });
 
 /**
@@ -34,14 +36,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const started = Date.now();
     const beat = setInterval(() => send("progress", { tokens: 0, elapsed: Math.round((Date.now() - started) / 1000) }), 2000);
     try {
-      if (parsed.data.record !== false) addMessage(id, "user", "text", message, { index: slide });
+      const media = parsed.data.media ?? [];
+      if (parsed.data.record !== false) addMessage(id, "user", "text", message, { index: slide, ...(media.length ? { media } : {}) });
       const res = await runAgentTurn(id, message, slide, {
         status: (phase, text) => {
           setActivity({ projectId: id, phase, label: text });
           send("status", { phase, text });
         },
         tool: (name, args) => send("tool", { name, args }),
-      });
+      }, media);
       send("done", { ...getProject(id), agent: res });
     } catch (e) {
       if (e instanceof ActionError) {

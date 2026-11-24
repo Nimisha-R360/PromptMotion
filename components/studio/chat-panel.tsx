@@ -1,11 +1,12 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Check, Download, Film, Loader2, Paperclip, RefreshCw, SendHorizontal, TriangleAlert, CircleCheck, ListChecks, Sparkles, MessageCircleQuestion } from "lucide-react";
+import { Bot, Check, Download, Film, Loader2, Paperclip, RefreshCw, SendHorizontal, TriangleAlert, CircleCheck, ListChecks, Sparkles, MessageCircleQuestion, X, Clapperboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { isMediaFile, mediaUrl } from "@/lib/client/api";
 import type { Studio } from "@/hooks/use-studio";
 import type { Message, Project } from "@/lib/types";
 import type { Framework } from "@/runtime/types";
@@ -37,6 +38,8 @@ export function ChatPanel({ studio, llmOnline }: { studio: Studio; llmOnline: bo
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  /** images / video clips attached to the next message (the agent animates them and writes the text from the message) */
+  const [attached, setAttached] = useState<File[]>([]);
 
   const messages = useMemo(() => project?.messages ?? [], [project]);
   useEffect(() => {
@@ -62,9 +65,10 @@ export function ChatPanel({ studio, llmOnline }: { studio: Studio; llmOnline: bo
         : `Feedback for slide ${studio.previewIndex + 1} — or “approve”…`;
 
   const submit = () => {
-    if (!text.trim() || busy) return;
-    studio.send(text);
+    if ((!text.trim() && !attached.length) || busy) return;
+    studio.send(text, attached);
     setText("");
+    setAttached([]);
   };
 
   const focusWith = (value: string) => {
@@ -85,7 +89,8 @@ export function ChatPanel({ studio, llmOnline }: { studio: Studio; llmOnline: bo
           <AssistantBubble>
             <p>
               Hi! I&apos;m your motion director. <strong className="text-foreground">Describe a video</strong> or{" "}
-              <strong className="text-foreground">upload your slides</strong> (.pptx, .pdf, .md, images). I&apos;ll design one slide at a time with Remotion, anime.js, Motion and GSAP components — you approve each slide or ask for a redesign.
+              <strong className="text-foreground">upload your slides</strong> (.pptx, .pdf, .md, images). Attach your own{" "}
+              <strong className="text-foreground">images or video clips</strong> with a request and I&apos;ll animate them in remocn scenes and write the slides around them. I&apos;ll design one slide at a time with Remotion, anime.js, Motion and GSAP components — you approve each slide or ask for a redesign.
             </p>
             {llmOnline === false && (
               <p className="mt-2 flex items-start gap-1.5 text-amber-300/90">
@@ -96,7 +101,7 @@ export function ChatPanel({ studio, llmOnline }: { studio: Studio; llmOnline: bo
 
           {messages.map((m) =>
             m.role === "user" ? (
-              <UserBubble key={m.id} text={m.content} />
+              <UserBubble key={m.id} text={m.content} media={project ? ((m.meta?.media as string[] | undefined) ?? []).map((ref) => ({ ref, url: mediaUrl(project.id, ref), kind: project.media.find((x) => x.ref === ref)?.kind, name: project.media.find((x) => x.ref === ref)?.name })) : []} />
             ) : (
               <AssistantMessage
                 key={m.id}
@@ -149,6 +154,14 @@ export function ChatPanel({ studio, llmOnline }: { studio: Studio; llmOnline: bo
         </div>
       )}
 
+      {attached.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto border-t px-3 pt-2 [scrollbar-width:none]" aria-label="Attached media">
+          {attached.map((f, i) => (
+            <AttachmentChip key={`${f.name}-${i}`} file={f} onRemove={() => setAttached((a) => a.filter((_, j) => j !== i))} />
+          ))}
+        </div>
+      )}
+
       <form
         className="flex items-end gap-2 p-3"
         onSubmit={(e) => {
@@ -156,7 +169,7 @@ export function ChatPanel({ studio, llmOnline }: { studio: Studio; llmOnline: bo
           submit();
         }}
       >
-        <Button type="button" variant="ghost" size="icon" aria-label="Upload slides" disabled={!!busy} onClick={() => fileRef.current?.click()}>
+        <Button type="button" variant="ghost" size="icon" aria-label="Upload slides, images or video clips" title="Upload slides (.pptx .pdf .md) or attach images / video clips" disabled={!!busy} onClick={() => fileRef.current?.click()}>
           <Paperclip />
         </Button>
         <input
@@ -164,12 +177,19 @@ export function ChatPanel({ studio, llmOnline }: { studio: Studio; llmOnline: bo
           type="file"
           hidden
           multiple
-          accept=".pptx,.pdf,.md,.markdown,.txt,.png,.jpg,.jpeg,.webp,.gif,.svg"
+          accept=".pptx,.pdf,.md,.markdown,.txt,.png,.jpg,.jpeg,.webp,.gif,.svg,.mp4,.m4v,.webm,.mov"
           onChange={(e) => {
             const files = Array.from(e.target.files ?? []);
-            if (files.length) studio.upload(files, text.trim() || undefined);
-            setText("");
             e.target.value = "";
+            if (!files.length) return;
+            // images / clips wait in the composer for the request that goes with them; documents upload as a deck
+            if (files.every(isMediaFile)) {
+              setAttached((a) => [...a, ...files].slice(0, 20));
+              requestAnimationFrame(() => inputRef.current?.focus());
+              return;
+            }
+            studio.upload(files, text.trim() || undefined);
+            setText("");
           }}
         />
         <Textarea
@@ -183,11 +203,11 @@ export function ChatPanel({ studio, llmOnline }: { studio: Studio; llmOnline: bo
               submit();
             }
           }}
-          placeholder={placeholder}
+          placeholder={attached.length ? (project ? `What should slide ${studio.previewIndex + 1} say or show with ${attached.length > 1 ? "these" : "this"}? (or name a slide)` : "Describe the video to make with these files…") : placeholder}
           rows={1}
           className="max-h-40 min-h-10 resize-none text-sm"
         />
-        <Button type="submit" size="icon" aria-label="Send" disabled={!text.trim() || !!busy}>
+        <Button type="submit" size="icon" aria-label="Send" disabled={(!text.trim() && !attached.length) || !!busy}>
           {busy ? <Loader2 className="animate-spin" /> : <SendHorizontal />}
         </Button>
       </form>
@@ -204,8 +224,46 @@ function Elapsed({ since }: { since: number }) {
   return <span className="text-muted-foreground tabular-nums">· {Math.max(0, Math.round((now - since) / 1000))}s</span>;
 }
 
-function UserBubble({ text }: { text: string }) {
-  return <div className="ml-8 self-end rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm whitespace-pre-wrap text-primary-foreground">{text}</div>;
+function UserBubble({ text, media = [] }: { text: string; media?: { ref: string; url: string; kind?: string; name?: string }[] }) {
+  return (
+    <div className="ml-8 flex flex-col items-end gap-1 self-end">
+      {media.length > 0 && (
+        <div className="flex flex-wrap justify-end gap-1">
+          {media.map((m) =>
+            m.kind === "video" ? (
+              <span key={m.ref} title={m.name} className="flex h-14 items-center gap-1 rounded-lg border bg-card px-2 text-[11px] text-muted-foreground">
+                <Clapperboard className="size-3.5" /> <span className="max-w-24 truncate">{m.name ?? "clip"}</span>
+              </span>
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img key={m.ref} src={m.url} alt={m.name ?? "attached image"} title={m.name} className="h-14 max-w-24 rounded-lg border object-cover" />
+            ),
+          )}
+        </div>
+      )}
+      <div className="rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm whitespace-pre-wrap text-primary-foreground">{text}</div>
+    </div>
+  );
+}
+
+function AttachmentChip({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const image = file.type.startsWith("image/");
+  const url = useMemo(() => (image ? URL.createObjectURL(file) : null), [file, image]);
+  useEffect(() => () => void (url && URL.revokeObjectURL(url)), [url]);
+  return (
+    <span className="relative flex h-12 shrink-0 items-center gap-1.5 rounded-lg border bg-card pr-6 pl-1 text-[11px] text-muted-foreground" title={file.name}>
+      {image && url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt="" className="size-10 rounded-md object-cover" />
+      ) : (
+        <Clapperboard className="ml-1 size-4" />
+      )}
+      <span className="max-w-24 truncate">{file.name}</span>
+      <button type="button" aria-label={`Remove ${file.name}`} onClick={onRemove} className="absolute top-0.5 right-0.5 rounded p-0.5 hover:bg-accent hover:text-foreground">
+        <X className="size-3" />
+      </button>
+    </span>
+  );
 }
 
 function AssistantBubble({ children, className }: { children: React.ReactNode; className?: string }) {

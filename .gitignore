@@ -70,3 +70,6 @@ Thumbs.db
 
 # local Claude Code settings
 .claude/settings.local.json
+
+# remocn gallery thumbnails (npm run remocn:thumbs)
+/public/remocn-thumbs/

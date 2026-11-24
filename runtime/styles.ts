@@ -37,7 +37,7 @@ html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:var(-
 .pm-l-split-image .pm-col{flex:1.1}
 .pm-l-split-image .pm-bullets li{font-size:32px}
 .pm-media{flex:1;margin:0;height:760px;border-radius:36px;overflow:hidden;position:relative;box-shadow:0 40px 120px rgba(0,0,0,.45)}
-.pm-media img{width:100%;height:100%;object-fit:cover;display:block}
+.pm-media img,.pm-media video{width:100%;height:100%;object-fit:cover;display:block}
 .pm-media-empty{background:linear-gradient(140deg,var(--pm-accent),var(--pm-accent2));display:grid;place-items:center}
 .pm-glyph{font-family:var(--pm-display);font-size:420px;font-weight:700;color:rgba(255,255,255,.85);mix-blend-mode:overlay}
 
@@ -183,6 +183,18 @@ html.pm-web-root,html.pm-web-root body{height:auto;overflow-x:hidden;overflow-y:
 .pm-tile{position:absolute;transform:scale(0)}
 .pm-curtain{position:absolute;inset:0;transform:translateX(-101%)}
 .pm-badge-corner{position:absolute;right:32px;top:28px;z-index:60;padding:10px 20px;border-radius:12px;background:rgba(0,0,0,.55);color:#fff;font:600 24px/1 ui-monospace,monospace;letter-spacing:.02em}
+
+/* remocn components (React/Remotion, mounted in a <Player>) */
+.pm-rc-ghost{display:inline-block;max-width:100%;visibility:hidden}
+.pm-rc-box{position:absolute;pointer-events:none}
+.pm-rc-fill{position:absolute;inset:0}
+.pm-rc-icon{position:absolute;right:110px;top:90px;width:180px;height:180px}
+.pm-portrait .pm-rc-icon{right:70px;top:70px;width:150px;height:150px}
+.pm-l-showcase .pm-content{align-items:center;text-align:center;justify-content:flex-start;padding:70px 110px 60px;gap:18px}
+.pm-l-showcase .pm-sub{font-size:32px}
+.pm-showcase{position:relative;flex:1;width:100%;min-height:0;border-radius:28px;overflow:hidden}
+.pm-web .pm-l-showcase .pm-showcase{flex:none;height:720px}
+.pm-portrait .pm-l-showcase .pm-content{padding:110px 70px 90px}
 
 /* player chrome */
 .pm-controls{position:fixed;left:16px;right:16px;bottom:14px;z-index:100;display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:14px;background:rgba(10,10,14,.72);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.1);color:#fff;font:500 13px/1 ui-sans-serif,system-ui,sans-serif;opacity:0;transform:translateY(8px);transition:opacity .25s,transform .25s}

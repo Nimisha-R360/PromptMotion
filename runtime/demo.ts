@@ -21,6 +21,7 @@ export const CATEGORY_SLOT: Record<Category, Slot> = {
   background: "background",
   decor: "decor",
   transition: "transition",
+  scene: "scene",
 };
 
 const DEMO_LAYOUT: Record<Category, Layout> = {
@@ -32,6 +33,7 @@ const DEMO_LAYOUT: Record<Category, Layout> = {
   background: "hero",
   decor: "hero",
   transition: "cards",
+  scene: "showcase",
 };
 
 export function demoSlide(layout: Layout, animations: Partial<SlideAnimations> = {}, title?: string): SlideSpec {

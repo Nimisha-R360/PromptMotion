@@ -5,6 +5,7 @@ import { remotion } from "./engines/remotion";
 import { anime } from "./engines/anime";
 import { motion } from "./engines/motion";
 import { gsapEngine } from "./engines/gsap";
+import { isRemocnId, isVideoSrc, remocnAvailable, remocnBackground, remocnDecor, remocnScene, remocnText } from "./engines/remocn";
 
 const ENGINES: EngineImpls[] = [remotion, anime, motion, gsapEngine];
 
@@ -13,6 +14,12 @@ export function findImpl<C extends Cat>(cat: C, id: string): EngineImpls[C][stri
   for (const e of ENGINES) {
     const f = e[cat][id];
     if (f) return f as EngineImpls[C][string];
+  }
+  // remocn components (only when their bundle was inlined into the page — see lib/compose.ts)
+  if (isRemocnId(id) && remocnAvailable(id)) {
+    if (cat === "text") return remocnText(id) as EngineImpls[C][string];
+    if (cat === "background") return remocnBackground(id) as EngineImpls[C][string];
+    if (cat === "decor") return remocnDecor(id) as EngineImpls[C][string];
   }
   return undefined;
 }
@@ -86,6 +93,9 @@ export function buildScene(spec: SlideSpec, theme: Theme, index: number, parent:
   const items: HTMLElement[] = [];
   const numbers: HTMLElement[] = [];
   const bars: HTMLElement[] = [];
+  let showcase: HTMLElement | null = null;
+  /** uploaded video clip: scrubbed with the master clock */
+  let video: HTMLVideoElement | null = null;
 
   const big = spec.layout === "hero" || spec.layout === "closing" || spec.layout === "big-number";
   const title = h("h1", "pm-title", spec.title);
@@ -154,7 +164,12 @@ export function buildScene(spec: SlideSpec, theme: Theme, index: number, parent:
       content.append(col);
       if (spec.layout === "split-image") {
         const fig = h("figure", "pm-media");
-        if (spec.image) {
+        if (spec.image && isVideoSrc(spec.image)) {
+          video = h("video") as HTMLVideoElement;
+          Object.assign(video, { src: spec.image, muted: true, playsInline: true, preload: "auto", loop: false });
+          video.setAttribute("aria-label", spec.imageAlt || spec.title);
+          fig.appendChild(video);
+        } else if (spec.image) {
           const img = h("img");
           img.src = spec.image;
           img.alt = spec.imageAlt || spec.title;
@@ -263,6 +278,17 @@ export function buildScene(spec: SlideSpec, theme: Theme, index: number, parent:
       blocks.push(q, who);
       break;
     }
+    case "showcase": {
+      title.style.fontSize = `calc(${Math.round(titleSize(spec.title, false) * 0.7)}px * var(--pm-ts, 1))`;
+      content.append(title);
+      if (sub) {
+        content.append(sub);
+        blocks.push(sub);
+      }
+      showcase = h("div", "pm-showcase");
+      content.append(showcase);
+      break;
+    }
   }
 
   // ── wire animations (scene must be attached so engines can measure/split) ──
@@ -287,6 +313,25 @@ export function buildScene(spec: SlideSpec, theme: Theme, index: number, parent:
     t(start, A.number, () => impl("number", A.number)(n, parsed, ctx), () => () => {});
   });
   if (bars.length) t(1.0, A.chart, () => impl("chart", A.chart)(bars, ctx), () => () => {});
+  const box = showcase;
+  if (box && A.scene)
+    t(
+      0.5,
+      A.scene,
+      () => remocnScene(A.scene!, box, { title: spec.title, subtitle: spec.subtitle ?? spec.body, bullets: spec.bullets, images: spec.images ?? (spec.image ? [spec.image] : undefined) }, ctx),
+      () => () => {},
+    );
+  const clip = video;
+  if (clip)
+    tracks.push({
+      start: 0,
+      seek: (tt) => {
+        // a paused <video> scrubbed to the scene time (loops if the clip is shorter than the slide)
+        const d = clip.duration;
+        const target = Number.isFinite(d) && d > 0 ? Math.max(0, tt) % d : Math.max(0, tt);
+        if (Math.abs(clip.currentTime - target) > 0.04) clip.currentTime = target;
+      },
+    });
 
   // minimum duration so every element finishes animating + 2s of hold
   const lastStart = Math.max(...tracks.map((tr) => tr.start), 0);

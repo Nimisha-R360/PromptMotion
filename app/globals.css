@@ -137,6 +137,7 @@
   --color-anime: #ff4b4b;
   --color-motion: #f5d90a;
   --color-gsap: #0ae448;
+  --color-remocn: #ec4899;
 }
 .pm-shimmer {
   background: linear-gradient(110deg, transparent 30%, oklch(1 0 0 / 6%) 50%, transparent 70%);

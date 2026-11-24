@@ -1,4 +1,5 @@
 import "server-only";
+import { activeCloud, cloudChat, isProviderUnavailable, PROVIDER_NAME, verifyCloud, type LlmProvider } from "@/lib/llm-providers";
 
 /**
  * Client for the local llama.cpp model (OpenAI-compatible API: llama-cpp-python server or native llama-server).
@@ -50,25 +51,32 @@ declare global {
 const state: LlmState = (globalThis.__pmLlm4 ??= { activity: null, lastSystem: null, warming: null, online: false, inflight: 0 });
 
 /** Warm when the last evaluated prompt starts with this one (the agent prompt begins with the design guide). */
-export const isWarm = (system: string) => !!state.lastSystem?.startsWith(system);
+export const isWarm = (system: string) => !!activeCloud() || !!state.lastSystem?.startsWith(system); // cloud models have nothing to warm up
 export function setActivity(a: Omit<LlmActivity, "startedAt"> | null) {
   state.activity = a ? { ...a, startedAt: state.activity?.projectId === a.projectId ? state.activity.startedAt : Date.now() } : null;
 }
 
-export async function llmStatus(system: string): Promise<{ online: boolean; model: string | null; url: string; warm: boolean; activity: LlmActivity | null }> {
+export async function llmStatus(
+  system: string,
+): Promise<{ online: boolean; model: string | null; url: string; warm: boolean; activity: LlmActivity | null; provider: LlmProvider }> {
+  const cloud = activeCloud();
+  if (cloud) {
+    const online = !!cloud.apiKey && (await verifyCloud({ ...cloud, apiKey: cloud.apiKey }));
+    return { online, model: online ? cloud.model : null, url: PROVIDER_NAME[cloud.provider], warm: true, activity: state.activity, provider: cloud.provider };
+  }
   try {
     const res = await fetch(`${LLM_BASE_URL}/models`, { signal: AbortSignal.timeout(2500), cache: "no-store" });
     if (!res.ok) throw new Error(String(res.status));
     const j = (await res.json()) as { data?: { id: string }[] };
     if (!state.online) state.lastSystem = null; // (re)started server → empty cache
     state.online = true;
-    return { online: true, model: j.data?.[0]?.id ?? LLM_MODEL, url: LLM_BASE_URL, warm: isWarm(system), activity: state.activity };
+    return { online: true, model: j.data?.[0]?.id ?? LLM_MODEL, url: LLM_BASE_URL, warm: isWarm(system), activity: state.activity, provider: "local" };
   } catch {
     // While a request is running the server may be too busy to answer the probe: that's busy, not offline.
-    if (state.inflight > 0 && state.online) return { online: true, model: LLM_MODEL, url: LLM_BASE_URL, warm: isWarm(system), activity: state.activity };
+    if (state.inflight > 0 && state.online) return { online: true, model: LLM_MODEL, url: LLM_BASE_URL, warm: isWarm(system), activity: state.activity, provider: "local" };
     state.online = false;
     state.lastSystem = null;
-    return { online: false, model: null, url: LLM_BASE_URL, warm: false, activity: state.activity };
+    return { online: false, model: null, url: LLM_BASE_URL, warm: false, activity: state.activity, provider: "local" };
   }
 }
 
@@ -114,6 +122,8 @@ export interface ChatJsonOptions {
  * Progress to the browser is reported by the route via heartbeats instead.
  */
 export async function chatJson<T>(opts: ChatJsonOptions): Promise<T> {
+  const cloud = activeCloud();
+  if (cloud) return cloudChatJson<T>(cloud, opts);
   const signal = opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS);
   let res: Response;
   state.inflight++;
@@ -160,4 +170,27 @@ export function parseJsonLoose<T>(text: string): T {
     if (a >= 0 && b > a) return JSON.parse(text.slice(a, b + 1)) as T;
     throw new Error("The model returned invalid JSON.");
   }
+}
+
+/** Same contract as chatJson, on Claude / ChatGPT (selected in the model settings). */
+async function cloudChatJson<T>(cloud: NonNullable<ReturnType<typeof activeCloud>>, opts: ChatJsonOptions): Promise<T> {
+  const name = PROVIDER_NAME[cloud.provider];
+  if (!cloud.apiKey) throw new LlmUnavailableError(`${name} is selected but no API key is set.`);
+  const signal = opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(TIMEOUT_MS)]) : AbortSignal.timeout(TIMEOUT_MS);
+  let out: { text: string; outputTokens: number };
+  state.inflight++;
+  try {
+    out = await cloudChat(
+      { ...cloud, apiKey: cloud.apiKey },
+      { system: opts.system, messages: opts.history ?? [{ role: "user", content: opts.user }], schema: opts.schema, signal },
+    );
+  } catch (e) {
+    if ((e as Error).name === "TimeoutError") throw new Error(`${name} timed out.`);
+    if (isProviderUnavailable(e)) throw new LlmUnavailableError(`${name} is not available: ${(e as Error).message}`);
+    throw e;
+  } finally {
+    state.inflight--;
+  }
+  opts.onProgress?.(out.outputTokens, out.text);
+  return parseJsonLoose<T>(out.text);
 }

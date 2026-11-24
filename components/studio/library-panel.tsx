@@ -12,6 +12,7 @@ import type { Registry } from "@/lib/client/api";
 import type { ComponentMeta } from "@/runtime/registry";
 import type { Category, Framework, SlideSpec } from "@/runtime/types";
 import { CATEGORY_SLOT } from "@/runtime/demo";
+import { RemocnBrowser } from "./remocn-browser";
 
 const CATEGORY_LABEL: Record<Category, string> = {
   text: "Text effects",
@@ -22,11 +23,12 @@ const CATEGORY_LABEL: Record<Category, string> = {
   background: "Backgrounds",
   decor: "Decor & SVG",
   transition: "Transitions",
+  scene: "Scenes (remocn)",
 };
 const CATEGORIES = Object.keys(CATEGORY_LABEL) as Category[];
 
 export function FrameworkDot({ fw, className }: { fw: Framework; className?: string }) {
-  const color = { remotion: "bg-remotion", anime: "bg-anime", motion: "bg-motion", gsap: "bg-gsap" }[fw];
+  const color = { remotion: "bg-remotion", anime: "bg-anime", motion: "bg-motion", gsap: "bg-gsap", remocn: "bg-remocn" }[fw];
   return <span aria-hidden className={cn("inline-block size-2 shrink-0 rounded-full", color, className)} />;
 }
 
@@ -43,28 +45,32 @@ export function LibraryPanel({ registry, theme, currentSpec, currentIndex, onApp
   const [fw, setFw] = useState<Framework | "all">("all");
   const [cat, setCat] = useState<Category | null>(null);
   const [selected, setSelected] = useState<ComponentMeta | null>(null);
+  const [tab, setTab] = useState("components");
 
   const inUse = useMemo(() => new Set(currentSpec ? Object.values(currentSpec.animations) : []), [currentSpec]);
+  // remocn has its own gallery tab; the Components tab lists the core engines
+  const core = useMemo(() => (registry?.components ?? []).filter((c) => c.framework !== "remocn"), [registry]);
+  const remocn = useMemo(() => (registry?.components ?? []).filter((c) => c.framework === "remocn"), [registry]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return (registry?.components ?? []).filter(
+    return core.filter(
       (c) =>
         (fw === "all" || c.framework === fw) &&
         (!cat || c.category === cat) &&
         (!q || `${c.name} ${c.id} ${c.description} ${c.uses.join(" ")} ${c.mood.join(" ")}`.toLowerCase().includes(q)),
     );
-  }, [registry, query, fw, cat]);
+  }, [core, query, fw, cat]);
 
   const counts = useMemo(() => {
-    const m: Record<string, number> = { all: registry?.components.length ?? 0 };
-    registry?.components.forEach((c) => (m[c.framework] = (m[c.framework] ?? 0) + 1));
+    const m: Record<string, number> = { all: core.length };
+    core.forEach((c) => (m[c.framework] = (m[c.framework] ?? 0) + 1));
     return m;
-  }, [registry]);
+  }, [core]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-sidebar">
-      <Tabs defaultValue="components" className="flex min-h-0 flex-1 flex-col gap-0">
+      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0">
         <div className="flex flex-col gap-3 border-b px-3 pt-3 pb-3">
           <div className="flex items-center justify-between">
             <h2 className="flex items-center gap-2 text-sm font-semibold">
@@ -74,6 +80,9 @@ export function LibraryPanel({ registry, theme, currentSpec, currentIndex, onApp
               <TabsTrigger value="components" className="px-2 text-xs">
                 Components
               </TabsTrigger>
+              <TabsTrigger value="remocn" className="gap-1 px-2 text-xs">
+                <FrameworkDot fw="remocn" /> remocn
+              </TabsTrigger>
               <TabsTrigger value="primitives" className="px-2 text-xs">
                 Primitives
               </TabsTrigger>
@@ -81,15 +90,15 @@ export function LibraryPanel({ registry, theme, currentSpec, currentIndex, onApp
           </div>
           <div className="relative">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input aria-label="Search components" placeholder="Search effects, e.g. scramble, spring…" value={query} onChange={(e) => setQuery(e.target.value)} className="h-8 pl-8 text-xs" />
+            <Input aria-label="Search components" placeholder={tab === "remocn" ? "Search remocn, e.g. terminal, pricing, logo…" : "Search effects, e.g. scramble, spring…"} value={query} onChange={(e) => setQuery(e.target.value)} className="h-8 pl-8 text-xs" />
             {query && (
               <button aria-label="Clear search" onClick={() => setQuery("")} className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground">
                 <X className="size-3.5" />
               </button>
             )}
           </div>
-          <div className="flex flex-wrap gap-1" role="group" aria-label="Framework filter">
-            {(["all", ...(registry?.frameworks.map((f) => f.id) ?? [])] as (Framework | "all")[]).map((id) => (
+          <div className={cn("flex flex-wrap gap-1", tab === "remocn" && "hidden")} role="group" aria-label="Framework filter">
+            {(["all", ...(registry?.frameworks.filter((f) => f.id !== "remocn").map((f) => f.id) ?? [])] as (Framework | "all")[]).map((id) => (
               <button
                 key={id}
                 onClick={() => setFw(id)}
@@ -110,7 +119,7 @@ export function LibraryPanel({ registry, theme, currentSpec, currentIndex, onApp
         <TabsContent value="components" className="mt-0 flex min-h-0 flex-1 flex-col">
           <div className="flex gap-1 overflow-x-auto border-b px-3 py-2 [scrollbar-width:none]">
             <CatChip active={!cat} onClick={() => setCat(null)} label="All" />
-            {CATEGORIES.map((c) => (
+            {CATEGORIES.filter((c) => core.some((x) => x.category === c)).map((c) => (
               <CatChip key={c} active={cat === c} onClick={() => setCat(cat === c ? null : c)} label={CATEGORY_LABEL[c]} />
             ))}
           </div>
@@ -163,6 +172,18 @@ export function LibraryPanel({ registry, theme, currentSpec, currentIndex, onApp
               })}
             </div>
           </ScrollArea>
+        </TabsContent>
+
+        <TabsContent value="remocn" className="mt-0 flex min-h-0 flex-1 flex-col">
+          {registry ? (
+            <RemocnBrowser components={remocn} query={query} currentSpec={currentSpec} currentIndex={currentIndex} onApply={onApply} onPreview={setSelected} />
+          ) : (
+            <div className="flex flex-col gap-2 p-3">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="pm-shimmer h-32 rounded-lg border bg-card/50" />
+              ))}
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="primitives" className="mt-0 min-h-0 flex-1">

@@ -4,6 +4,7 @@ import path from "node:path";
 import { nanoid } from "nanoid";
 import { db, DATA_DIR } from "@/lib/db";
 import type { SlideSpec } from "@/runtime/types";
+import type { MediaAsset } from "@/lib/types";
 
 const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
 export const IMAGE_MIME: Record<string, string> = {
@@ -15,15 +16,43 @@ export const IMAGE_MIME: Record<string, string> = {
   svg: "image/svg+xml",
 };
 
-export function saveAsset(projectId: string, data: Buffer, mime: string): string {
-  const ext = Object.entries(IMAGE_MIME).find(([, m]) => m === mime)?.[0] ?? "bin";
+/** video clips ("scenes") the user can attach for the agent to place on slides */
+export const VIDEO_MIME: Record<string, string> = {
+  mp4: "video/mp4",
+  m4v: "video/mp4",
+  webm: "video/webm",
+  mov: "video/quicktime",
+};
+/** mime of an attachable media file (image or video clip) from its name, or undefined */
+export const mediaMime = (fileName: string) => {
+  const ext = path.extname(fileName).slice(1).toLowerCase();
+  return IMAGE_MIME[ext] ?? VIDEO_MIME[ext];
+};
+
+export function saveAsset(projectId: string, data: Buffer, mime: string, name = ""): string {
+  const ext = Object.entries({ ...IMAGE_MIME, ...VIDEO_MIME }).find(([, m]) => m === mime)?.[0] ?? "bin";
   const id = nanoid(10);
   const dir = path.join(UPLOAD_DIR, projectId);
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${id}.${ext}`);
   fs.writeFileSync(file, data);
-  db.prepare(`INSERT INTO assets (id, project_id, mime, file, bytes) VALUES (?, ?, ?, ?, ?)`).run(id, projectId, mime, file, data.length);
+  db.prepare(`INSERT INTO assets (id, project_id, mime, file, bytes, name) VALUES (?, ?, ?, ?, ?, ?)`).run(id, projectId, mime, file, data.length, name.slice(0, 200));
   return `asset:${id}`;
+}
+
+
+/** Images / video clips uploaded to a project (attached in the chat, or from an uploaded deck). */
+export function listMedia(projectId: string): MediaAsset[] {
+  const rows = db.prepare(`SELECT id, name, mime, bytes FROM assets WHERE project_id = ? ORDER BY created_at, rowid`).all(projectId) as { id: string; name: string; mime: string; bytes: number }[];
+  return rows
+    .filter((r) => r.mime.startsWith("image/") || r.mime.startsWith("video/"))
+    .map((r, i) => ({ ref: `asset:${r.id}`, name: r.name || `media ${i + 1}`, mime: r.mime, kind: r.mime.startsWith("video/") ? "video" : "image", bytes: r.bytes }));
+}
+
+/** The stored file of one asset (for serving thumbnails in the studio). */
+export function assetFile(projectId: string, assetId: string): { mime: string; file: string } | undefined {
+  const row = db.prepare(`SELECT mime, file FROM assets WHERE id = ? AND project_id = ?`).get(assetId, projectId) as { mime: string; file: string } | undefined;
+  return row && fs.existsSync(row.file) ? row : undefined;
 }
 
 const dataUriCache = new Map<string, string>();
@@ -40,8 +69,14 @@ function assetDataUri(ref: string, projectId: string): string | undefined {
 
 /** Inline uploaded images so the exported HTML is fully standalone. */
 export function resolveAssets(spec: SlideSpec, projectId: string): SlideSpec {
-  if (!spec.image?.startsWith("asset:")) return spec;
-  return { ...spec, image: assetDataUri(spec.image, projectId) };
+  const isRef = (x?: string) => !!x?.startsWith("asset:");
+  if (!isRef(spec.image) && !spec.images?.some(isRef)) return spec;
+  const resolve = (x: string) => (isRef(x) ? assetDataUri(x, projectId) : x);
+  return {
+    ...spec,
+    image: spec.image ? resolve(spec.image) : undefined,
+    ...(spec.images ? { images: spec.images.map(resolve).filter((x): x is string => !!x) } : {}),
+  };
 }
 
 export function deleteProjectAssets(projectId: string) {

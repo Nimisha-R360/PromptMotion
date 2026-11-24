@@ -73,7 +73,10 @@ Output is **grammar-constrained** (JSON schema → GBNF), so the model can only 
 | `scripts/build-runtime.mjs` | esbuild bundle → `runtime-dist/pm-runtime.js` (Remotion's pure modules aliased directly so React isn't bundled). |
 | `lib/designer/*` | Prompts, per-layout JSON schemas, normalization, rule-based fallback. |
 | `lib/parsers/index.ts` | PPTX (jszip + XML), PDF (pdfjs), Markdown, images. |
-| `lib/compose.ts` | Spec → standalone HTML. |
+| `lib/compose.ts` | Spec → standalone HTML (inlines the remocn host + only the remocn components the video uses). |
+| `components/remocn/`, `lib/remocn*/` | Source of the [remocn](https://remocn.dev) registry (React/Remotion components), installed via shadcn. |
+| `runtime/remocn/*`, `runtime/engines/remocn.ts` | remocn integration: `manifest.json`/`catalog.json` (generated), the React host that renders a component in a Remotion `<Player>` seeked by the master clock, and the adapter that fills props from slide content + theme. |
+| `scripts/remocn-manifest.ts`, `scripts/build-remocn.mjs` | Classify remocn components into slots (title text effects, shader backgrounds, animated-icon decor, full-frame `showcase` scenes) and bundle them into `runtime-dist/remocn/`. |
 | `db/migrations/001_init.sql` | `projects`, `slides` (brief, spec, revision history), `messages`, `assets`. |
 
 ### API
@@ -94,10 +97,20 @@ Output is **grammar-constrained** (JSON schema → GBNF), so the model can only 
 | GET | `/api/projects/:id/preview?scope=slide&index=` / `scope=all` | player HTML |
 | GET | `/api/projects/:id/export[?draft=1]` | download standalone `.html` |
 
+### remocn components
+
+~870 remocn components are available next to the 80 core ones (library filter "remocn"). The designer can't take all of them in its prompt, so each slide gets a short keyword/mood-matched shortlist per slot; ask for "remocn" or name an effect (e.g. "use the remocn mesh gradient background", "show a github stars scene") and the agent applies it. The `showcase` layout is a full-frame remocn scene with a short title. Transition presentations (41) and 16 components whose required props can't be filled from slide content aren't used on slides.
+
+```bash
+npm run remocn:manifest   # after adding/updating components in components/remocn
+npm run build:runtime     # also builds runtime-dist/remocn (part of dev/build)
+```
+
 ### Tests
 
 ```bash
 npm run test:runtime   # headless Chrome: every component implemented + scrubs (forward & backward) without errors
+npm run test:remocn    # headless Chrome: every remocn component mounts on its demo slide and scrubs
 npm run typecheck && npm run lint && npm run build
 ```
 

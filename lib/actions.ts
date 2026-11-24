@@ -28,7 +28,7 @@ const need = (id: string): Project => {
 
 function reviewCard(projectId: string, index: number, note: string, extra: Record<string, unknown> = {}) {
   const spec = getProject(projectId)!.slides[index].spec!;
-  const components = slotsFor(spec.layout).map((s) => ({ slot: s, id: spec.animations[s], name: getComponent(spec.animations[s])?.name }));
+  const components = slotsFor(spec.layout).map((s) => ({ slot: s, id: spec.animations[s], name: getComponent(spec.animations[s] ?? "")?.name }));
   addMessage(projectId, "assistant", "slide_review", note, { index, layout: spec.layout, components, ...extra });
 }
 
@@ -159,11 +159,32 @@ export function applyComponent(projectId: string, index: number, componentId: st
   if (!meta) throw new ActionError(`Unknown component ${componentId}.`);
   const slot = (Object.keys(SLOT_CATEGORY) as Slot[]).find((s) => SLOT_CATEGORY[s] === meta.category)!;
   r.status("applying", `Applying ${meta.name} (${meta.framework}) to slide ${index + 1}…`);
-  patchSlideSpec(projectId, index, { ...spec, animations: { ...spec.animations, [slot]: componentId } });
+  // a remocn scene is the whole slide: it needs the showcase layout
+  const layout = slot === "scene" ? "showcase" : spec.layout;
+  patchSlideSpec(projectId, index, { ...spec, layout, animations: { ...spec.animations, [slot]: componentId } });
   setSlideStatus(projectId, index, "review");
   updateProject(projectId, { currentIndex: index });
   reviewCard(projectId, index, `Applied ${meta.name} to the ${slot} of slide ${index + 1}.`);
   return { slide: index + 1, slot, component: componentId };
+}
+
+/**
+ * Put the user's uploaded image(s) / video clip on a slide and (re)design it around them: pictures go into a remocn
+ * scene that shows them (showcase layout), a clip plays in the split-image media block; the text is written from the
+ * user's request. `refs` are `asset:<id>` of the project's media.
+ */
+export async function placeMedia(projectId: string, index: number, refs: string[], feedback: string | undefined, r: Reporter) {
+  const project = need(projectId);
+  const slide = project.slides[index];
+  if (!slide) throw new ActionError(`Slide ${index + 1} does not exist (the video has ${project.slides.length} slides).`);
+  if (project.stage !== "designing" && project.stage !== "complete") throw new ActionError("Approve the outline first.");
+  const media = refs.map((ref) => project.media.find((m) => m.ref === ref)).filter((m): m is NonNullable<typeof m> => !!m);
+  if (!media.length) throw new ActionError("That media file was not found — attach it again.");
+  // one clip, or a set of pictures (a clip can't share a scene with pictures)
+  const pick = media[0].kind === "video" ? [media[0]] : media.filter((m) => m.kind === "image");
+  updateSlideBrief(projectId, index, { ...slide.brief, image: pick[0].ref, images: pick.length > 1 ? pick.map((m) => m.ref) : undefined });
+  const names = pick.map((m) => m.name).join(", ");
+  return { ...(await designSlide(projectId, index, feedback?.trim() || `Present the uploaded ${pick[0].kind === "video" ? "clip" : "image"} ${names} with an animated scene.`, r)), media: names };
 }
 
 export function changeTheme(projectId: string, theme: string, r: Reporter) {
