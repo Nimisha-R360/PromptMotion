@@ -1,11 +1,12 @@
 import "server-only";
 import { chatJson, LlmUnavailableError } from "@/lib/llm";
 import { THEMES } from "@/runtime/themes";
-import { LAYOUTS, SLOT_CATEGORY, STYLES, type Layout, type SlideSpec, type Slot } from "@/runtime/types";
+import { LAYOUTS, SLOT_CATEGORY, STYLES, type Framework, type Layout, type SlideSpec, type Slot } from "@/runtime/types";
 import { remocnCandidates } from "@/runtime/remocn/registry";
 import { MOODS, type MediaAsset, type Mood, type Project, type SlideBrief } from "@/lib/types";
 import { DESIGNER_SYSTEM, GROUP_LAYOUTS, LAYOUT_GROUP, designOnlySchema, outlineSchema, slideSchema, slotsFor, type ExtraIds } from "./schema";
 import { compatibleLayouts, engineForIndex, normalizeSpec, pickAnimations } from "./normalize";
+import { MAX_SLIDES, MIN_SLIDES, startOptionsBrief, type StartOptions } from "@/lib/start-options";
 
 export type Progress = (info: { tokens: number; stage: string }) => void;
 
@@ -18,14 +19,17 @@ export interface OutlineResult {
   warning?: string;
 }
 
-const ENGINE_NAME = { gsap: "GSAP", anime: "anime.js", motion: "Motion", remotion: "Remotion", remocn: "remocn" } as const;
+const ENGINE_NAME: Record<Framework, string> = { gsap: "GSAP", anime: "anime.js", motion: "Motion", remotion: "Remotion", remocn: "remocn", onda: "Onda" };
 
 // ───────────────────────── outline (prompt mode) ─────────────────────────
 
 export async function generateOutline(project: Project, feedback: string | undefined, onProgress?: Progress): Promise<OutlineResult> {
   const prev = project.slides.map((s, i) => `${i + 1}. [${s.brief.layout}] ${s.brief.title} — ${s.brief.goal ?? ""}`).join("\n");
-  const m = project.prompt.match(/\b(\d{1,2})\s*[- ]?\s*(?:slides?|scenes?|parts?)\b/i);
-  const count = m ? Math.min(12, Math.max(2, Number(m[1]))) : undefined;
+  const opts = project.options ?? {};
+  // slide count: asked for in the feedback ("make it 3 slides") > picked on the start screen > written in the prompt
+  const asked = (text: string | undefined) => text?.match(/\b(\d{1,2})\s*[- ]?\s*(?:slides?|scenes?|parts?)\b/i)?.[1];
+  const wanted = asked(feedback) ?? opts.slides ?? asked(project.prompt);
+  const count = wanted != null ? Math.min(MAX_SLIDES, Math.max(MIN_SLIDES, Number(wanted))) : undefined;
   // grayscale / light themes look flat — only offer them when the request asks for that look
   const themeIds = THEMES.map((t) => t.id).filter(
     (id) =>
@@ -34,11 +38,12 @@ export async function generateOutline(project: Project, feedback: string | undef
   );
   const user = [
     `VIDEO REQUEST:\n${project.prompt}`,
+    ...startOptionsBrief(opts, "outline", count),
     feedback && prev ? `\nCURRENT OUTLINE:\n${prev}\n\nUSER FEEDBACK ON THE OUTLINE: "${feedback}"\nRewrite the outline applying the feedback.` : "",
     `\nPlan the video as an outline of ${count ? `exactly ${count}` : "3-7"} slides. Slide 1 should be "hero", the last slide "closing".`,
     `Choose layouts that fit each message (stats/chart/big-number for numbers, cards/timeline for features or steps, quote for testimonials).`,
     `"goal" = what the slide must communicate, including the concrete facts/numbers from the request.`,
-    `Pick a visual theme id and a mood that suit the topic. Theme ids are only visual styles: never mention them in titles or goals.`,
+    `Pick a visual theme id${opts.mood ? "" : " and a mood"} that suit the topic. Theme ids are only visual styles: never mention them in titles or goals.`,
     `Theme ids: ${themeIds.join(", ")}.`,
   ];
   const media = project.media ?? [];
@@ -52,7 +57,8 @@ export async function generateOutline(project: Project, feedback: string | undef
     const out = await chatJson<{ title: string; theme: string; mood: Mood; slides: { layout: Layout; title: string; goal: string; media?: number }[] }>({
       system: DESIGNER_SYSTEM,
       user: user.join("\n"),
-      schema: outlineSchema(count, themeIds, media.length),
+      // a mood picked on the start screen is the only mood offered
+      schema: outlineSchema(count, themeIds, media.length, opts.mood ? [opts.mood] : MOODS),
       maxTokens: 900,
       temperature: 0.6,
       onProgress: (tokens) => onProgress?.({ tokens, stage: "outline" }),
@@ -64,13 +70,13 @@ export async function generateOutline(project: Project, feedback: string | undef
     return {
       title: out.title?.trim() || project.title,
       theme: themeIds.includes(out.theme) ? out.theme : "midnight",
-      mood: MOODS.includes(out.mood) ? out.mood : "energetic",
+      mood: opts.mood ?? (MOODS.includes(out.mood) ? out.mood : "energetic"),
       briefs,
       usedLlm: true,
     };
   } catch (e) {
     if (!(e instanceof LlmUnavailableError)) console.error("[outline] LLM failed, using fallback", e);
-    const fb = fallbackOutline(project.prompt);
+    const fb = fallbackOutline(project.prompt, { ...opts, slides: count });
     placeMediaInOutline(fb.briefs, project.media ?? [], []);
     return { ...fb, usedLlm: false, warning: (e as Error).message };
   }
@@ -110,7 +116,7 @@ export function placeMediaInOutline(briefs: SlideBrief[], media: MediaAsset[], p
   }
 }
 
-function fallbackOutline(prompt: string): Omit<OutlineResult, "usedLlm"> {
+function fallbackOutline(prompt: string, opts: StartOptions = {}): Omit<OutlineResult, "usedLlm"> {
   const sentences = prompt
     .split(/(?<=[.!?])\s+|\n+/)
     .map((s) => s.trim())
@@ -125,14 +131,16 @@ function fallbackOutline(prompt: string): Omit<OutlineResult, "usedLlm"> {
       .slice(0, 60)
       .trim() || "Your story";
   const t = topic.charAt(0).toUpperCase() + topic.slice(1);
-  const briefs: SlideBrief[] = [
-    { layout: "hero", title: t, goal: "Introduce the topic" },
+  const middle: SlideBrief[] = [
     { layout: "title-bullets", title: "Why it matters", goal: sentences.slice(1, 4).join(" ") || `Key reasons behind ${topic}` },
     { layout: "cards", title: "Key ideas", goal: `Three core ideas about ${topic}` },
     { layout: "stats", title: "By the numbers", goal: `Highlight figures related to ${topic}` },
-    { layout: "closing", title: "Thank you", goal: "Call to action" },
   ];
-  return { title: t, theme: "midnight", mood: "energetic", briefs };
+  const body = Array.from({ length: Math.max(0, (opts.slides ?? 5) - 2) }, (_, i): SlideBrief =>
+    middle[i] ?? { layout: "title-bullets", title: `More about ${topic}`.slice(0, 60), goal: `Another key point about ${topic}` },
+  );
+  const briefs: SlideBrief[] = [{ layout: "hero", title: t, goal: "Introduce the topic" }, ...body, { layout: "closing", title: "Thank you", goal: "Call to action" }];
+  return { title: t, theme: "midnight", mood: opts.mood ?? "energetic", briefs };
 }
 
 // ───────────────────────── slide design ─────────────────────────
@@ -218,6 +226,7 @@ export async function generateSlide(project: Project, index: number, feedback: s
 
   const context = [
     `VIDEO: "${project.title}" — mood: ${project.mood}, theme: ${project.theme}.`,
+    ...startOptionsBrief(project.options ?? {}, "slide"),
     project.prompt ? `ORIGINAL REQUEST:\n${project.prompt}` : `SOURCE: uploaded file ${project.sourceName ?? ""}`,
     `OUTLINE:\n${project.slides.map((s, i) => `${i + 1}. ${s.brief.title}${i === index ? "   <== THIS SLIDE" : ""}`).join("\n")}`,
   ].join("\n\n");
@@ -369,6 +378,6 @@ function fallbackSlide(brief: SlideBrief, index: number, total: number, mood: Mo
     { index, mood, avoid, video },
   );
   spec.style = varyStyle(undefined, [], index * 2 + revision);
-  spec.note = "Designed by the rule-based designer (local model unavailable).";
+  spec.note = "Designed by the rule-based designer (model unavailable).";
   return spec;
 }

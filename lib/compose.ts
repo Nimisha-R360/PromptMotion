@@ -3,17 +3,27 @@ import path from "node:path";
 import type { VideoSpec } from "@/runtime/types";
 import { GOOGLE_FONTS_HREF, getTheme } from "@/runtime/themes";
 import { slotsFor } from "@/runtime/layouts";
+import { usesOnda } from "@/runtime/cards";
 
-const RUNTIME_PATH = path.join(process.cwd(), "runtime-dist", "pm-runtime.js");
-let cache: { mtime: number; code: string } | null = null;
+const DIST = path.join(process.cwd(), "runtime-dist");
+const cache = new Map<string, { mtime: number; code: string }>();
 
-/** The bundled player runtime (anime.js + Motion + GSAP + Remotion primitives), re-read when rebuilt. */
-export function runtimeCode(): string {
-  const stat = fs.statSync(RUNTIME_PATH, { throwIfNoEntry: false });
-  if (!stat) throw new Error("Runtime bundle missing — run `npm run build:runtime`.");
-  if (!cache || cache.mtime !== stat.mtimeMs) cache = { mtime: stat.mtimeMs, code: fs.readFileSync(RUNTIME_PATH, "utf8") };
-  return cache.code;
+/** A bundle from runtime-dist, re-read when rebuilt. */
+function bundle(file: string): string {
+  const p = path.join(DIST, file);
+  const stat = fs.statSync(p, { throwIfNoEntry: false });
+  if (!stat) throw new Error(`Runtime bundle ${file} missing — run \`npm run build:runtime\`.`);
+  const hit = cache.get(file);
+  if (hit && hit.mtime === stat.mtimeMs) return hit.code;
+  const code = fs.readFileSync(p, "utf8");
+  cache.set(file, { mtime: stat.mtimeMs, code });
+  return code;
 }
+
+/** The bundled player runtime (anime.js + Motion + GSAP + Remotion primitives). */
+export const runtimeCode = () => bundle("pm-runtime.js");
+/** The Onda add-on (React + Remotion + Onda cards and charts): only for pages whose slides use one. */
+export const ondaCode = () => bundle("pm-onda.js");
 
 const REMOCN_DIR = path.join(process.cwd(), "runtime-dist", "remocn");
 const fileCache = new Map<string, { mtime: number; code: string }>();
@@ -61,6 +71,8 @@ export function composeHtml(spec: VideoSpec): string {
   const remocn = remocnCode(spec)
     .map((c) => `<script>${c.replace(/<\/script/gi, "<\\/script")}</script>\n`)
     .join("");
+  // add-ons load first: the player draws remocn components and Onda cards/charts while it builds the slides
+  const onda = spec.slides.some(usesOnda) ? `<script>${ondaCode().replace(/<\/script/gi, "<\\/script")}</script>\n` : "";
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -75,7 +87,7 @@ export function composeHtml(spec: VideoSpec): string {
 </head>
 <body>
 <script id="pm-spec" type="application/json">${safeJson(spec)}</script>
-${remocn}<script>${code}</script>
+${remocn}${onda}<script>${code}</script>
 </body>
 </html>`;
 }

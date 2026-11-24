@@ -5,7 +5,7 @@ import { buildVideoSpec } from "@/lib/video";
 
 export const runtime = "nodejs";
 
-/** HTML preview for the center player. ?scope=slide&index=N (focused loop) or ?scope=all · ?format=web for the web page */
+/** HTML preview for the center player. ?scope=slide&index=N (focused loop) or ?scope=all · ?format=web for the web page · ?edit=1 click-to-edit text */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const project = getProject(id);
@@ -14,7 +14,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const scope = sp.get("scope") === "all" ? "all" : "slide";
   const index = Number(sp.get("index") ?? project.currentIndex) || 0;
   const format = sp.get("format") === "web" ? "web" : "video";
-  const spec = buildVideoSpec(project, scope, index, format);
+  const spec = buildVideoSpec(project, scope, index, format, { editable: sp.get("edit") === "1" });
   if (!spec) return apiError(404, "not_found", "Nothing designed yet");
   return new Response(composeHtml(spec), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }

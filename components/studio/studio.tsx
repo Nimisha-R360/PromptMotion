@@ -26,7 +26,7 @@ export function Studio() {
   const llmBusy = !!studio.busy || !!llm?.activity || (!!llm?.online && !llm.warm);
   const [llmRefresh, setLlmRefresh] = useState(0);
   useEffect(() => {
-    const poll = () => api.llm().then(setLlm).catch(() => setLlm({ online: false, model: null, url: "", warm: false, activity: null }));
+    const poll = () => api.llm().then(setLlm).catch(() => setLlm({ provider: "local", online: false, model: null, url: "", warm: false, activity: null }));
     poll();
     const t = setInterval(poll, llmBusy ? 3000 : 15000);
     return () => clearInterval(t);
@@ -58,6 +58,11 @@ export function Studio() {
         )}
         <div className="ml-auto flex items-center gap-2">
           <ModelStatus llm={llm} busy={studio.busy} onSettingsSaved={() => setLlmRefresh((n) => n + 1)} />
+          {project && (
+            <Button size="sm" onClick={() => studio.openProject(null)}>
+              <Plus /> New video
+            </Button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
@@ -102,7 +107,14 @@ export function Studio() {
 
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
         <ResizablePanel defaultSize="22%" minSize="16%" maxSize="35%">
-          <LibraryPanel registry={registry} theme={project?.theme ?? "midnight"} currentSpec={currentSpec} currentIndex={studio.previewIndex} onApply={studio.applyComponent} />
+          <LibraryPanel
+            registry={registry}
+            theme={project?.theme ?? "midnight"}
+            currentSpec={currentSpec}
+            currentIndex={studio.previewIndex}
+            onApply={studio.applyComponent}
+            onApplyCard={studio.applyCard}
+          />
         </ResizablePanel>
         <ResizableHandle />
         <ResizablePanel defaultSize="50%" minSize="30%">
@@ -110,7 +122,7 @@ export function Studio() {
         </ResizablePanel>
         <ResizableHandle />
         <ResizablePanel defaultSize="28%" minSize="20%" maxSize="40%">
-          <ChatPanel studio={studio} llmOnline={llm?.online ?? null} />
+          <ChatPanel studio={studio} llmOnline={llm?.online ?? null} llmProvider={llm?.provider ?? "local"} />
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>

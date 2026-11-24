@@ -6,7 +6,8 @@ import { MOODS } from "@/lib/types";
 export { LAYOUT_GROUP, GROUP_LAYOUTS, slotsFor, type Group } from "@/runtime/layouts";
 import { LAYOUT_GROUP, GROUP_LAYOUTS, slotsFor } from "@/runtime/layouts";
 
-const idsFor = (slot: Slot) => componentsByCategory(SLOT_CATEGORY[slot]).map((c) => c.id);
+// Onda components (React add-on) are added by the user from the Library, not picked by the designer
+const idsFor = (slot: Slot) => componentsByCategory(SLOT_CATEGORY[slot]).filter((c) => c.framework !== "onda").map((c) => c.id);
 
 /** Extra (remocn) component ids offered for this slide, per slot — see remocnCandidates(). */
 export type ExtraIds = Partial<Record<Slot, string[]>>;
@@ -95,13 +96,14 @@ export function designOnlySchema(layouts: Layout[], editableText = false, extra:
   };
 }
 
-export function outlineSchema(count?: number, themes: string[] = THEMES.map((t) => t.id), mediaCount = 0) {
+/** `mediaCount`: uploaded pictures/clips the slides can present · `moods`: the moods allowed (one when picked at start) */
+export function outlineSchema(count?: number, themes: string[] = THEMES.map((t) => t.id), mediaCount = 0, moods: readonly string[] = MOODS) {
   return {
     type: "object",
     properties: {
       title: str,
       theme: { type: "string", enum: themes },
-      mood: { type: "string", enum: MOODS },
+      mood: { type: "string", enum: [...moods] },
       slides: {
         type: "array",
         minItems: count ?? 3,
@@ -159,7 +161,7 @@ ${(Object.keys(SLOT_LABEL) as Slot[])
   .map(
     (slot) =>
       `${SLOT_LABEL[slot]}\n` +
-      COMPONENTS.filter((c) => c.category === SLOT_CATEGORY[slot])
+      COMPONENTS.filter((c) => c.category === SLOT_CATEGORY[slot] && c.framework !== "onda")
         .map((c) => `  - ${c.id}: ${c.description} [${c.mood.join(",")}]`)
         .join("\n"),
   )

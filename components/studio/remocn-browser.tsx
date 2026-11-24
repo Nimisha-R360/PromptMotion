@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import type { ComponentMeta } from "@/runtime/registry";
 import type { Category, SlideSpec } from "@/runtime/types";
 import { slotsFor } from "@/runtime/layouts";
-import { CATEGORY_SLOT } from "@/runtime/demo";
+import { CATEGORY_SLOT, type SlotCategory } from "@/runtime/demo";
 
 /**
  * The remocn registry (~870 React/Remotion components) as a searchable gallery: filter by kind and topic, preview,
@@ -89,7 +89,8 @@ export function RemocnBrowser({ components, query, currentSpec, currentIndex, on
   /** why "Use it" can't apply to the slide in view (or null when it can) */
   const blocked = (c: ComponentMeta): string | null => {
     if (!currentSpec) return "Design a slide first, then use components on it.";
-    const slot = CATEGORY_SLOT[c.category];
+    // remocn components never use the Onda "card" category (it has no animation slot)
+    const slot = CATEGORY_SLOT[c.category as SlotCategory];
     if (currentSpec.animations[slot] === c.id) return `Already on slide ${currentIndex + 1}.`;
     if (slot !== "scene" && !slotsFor(currentSpec.layout).includes(slot)) return `A ${currentSpec.layout} slide has no ${slot} slot.`;
     return null;
@@ -138,7 +139,7 @@ export function RemocnBrowser({ components, query, currentSpec, currentIndex, on
           <ul className="grid grid-cols-1 gap-2 @[300px]:grid-cols-2">
             {results.slice(0, limit).map((c) => {
               const why = blocked(c);
-              const slot = CATEGORY_SLOT[c.category];
+              const slot = CATEGORY_SLOT[c.category as SlotCategory];
               return (
                 <li key={c.id} className="flex flex-col overflow-hidden rounded-lg border bg-card/60 transition-colors hover:border-remocn/50">
                   <button onClick={() => onPreview(c)} className="group relative aspect-video w-full overflow-hidden bg-muted text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none" aria-label={`Preview ${c.name}`}>

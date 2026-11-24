@@ -1,0 +1,52 @@
+{
+  "components": [
+    {
+      "slug": "bar-chart",
+      "componentName": "BarChart",
+      "schemaName": "barChartSchema",
+      "importPath": "./bar-chart/BarChart"
+    },
+    {
+      "slug": "bento-grid",
+      "componentName": "BentoGrid",
+      "schemaName": "bentoGridSchema",
+      "importPath": "./bento-grid/BentoGrid"
+    },
+    {
+      "slug": "line-chart",
+      "componentName": "LineChart",
+      "schemaName": "lineChartSchema",
+      "importPath": "./line-chart/LineChart"
+    },
+    {
+      "slug": "pie-reveal",
+      "componentName": "PieReveal",
+      "schemaName": "pieRevealSchema",
+      "importPath": "./pie-reveal/PieReveal"
+    },
+    {
+      "slug": "pricing-card",
+      "componentName": "PricingCard",
+      "schemaName": "pricingCardSchema",
+      "importPath": "./pricing-card/PricingCard"
+    },
+    {
+      "slug": "progress-bar",
+      "componentName": "ProgressBar",
+      "schemaName": "progressBarSchema",
+      "importPath": "./progress-bar/ProgressBar"
+    },
+    {
+      "slug": "skeleton-card",
+      "componentName": "SkeletonCard",
+      "schemaName": "skeletonCardSchema",
+      "importPath": "./skeleton-card/SkeletonCard"
+    },
+    {
+      "slug": "spotlight-card",
+      "componentName": "SpotlightCard",
+      "schemaName": "spotlightCardSchema",
+      "importPath": "./spotlight-card/SpotlightCard"
+    }
+  ]
+}

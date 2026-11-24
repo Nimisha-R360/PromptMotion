@@ -15,6 +15,7 @@ import { CATEGORY_SLOT } from "@/runtime/demo";
 import { RemocnBrowser } from "./remocn-browser";
 
 const CATEGORY_LABEL: Record<Category, string> = {
+  card: "Cards",
   text: "Text effects",
   entrance: "Entrances",
   list: "Lists & stagger",
@@ -28,7 +29,7 @@ const CATEGORY_LABEL: Record<Category, string> = {
 const CATEGORIES = Object.keys(CATEGORY_LABEL) as Category[];
 
 export function FrameworkDot({ fw, className }: { fw: Framework; className?: string }) {
-  const color = { remotion: "bg-remotion", anime: "bg-anime", motion: "bg-motion", gsap: "bg-gsap", remocn: "bg-remocn" }[fw];
+  const color = { remotion: "bg-remotion", anime: "bg-anime", motion: "bg-motion", gsap: "bg-gsap", remocn: "bg-remocn", onda: "bg-onda" }[fw];
   return <span aria-hidden className={cn("inline-block size-2 shrink-0 rounded-full", color, className)} />;
 }
 
@@ -37,18 +38,20 @@ interface Props {
   theme: string;
   currentSpec: SlideSpec | null;
   currentIndex: number;
-  onApply: (slot: string, id: string) => void;
+  onApply: (slot: string, id: string, layout?: string) => void;
+  /** Onda card on the current slide (null removes it) */
+  onApplyCard: (id: string | null, name?: string) => void;
 }
 
-export function LibraryPanel({ registry, theme, currentSpec, currentIndex, onApply }: Props) {
+export function LibraryPanel({ registry, theme, currentSpec, currentIndex, onApply, onApplyCard }: Props) {
   const [query, setQuery] = useState("");
   const [fw, setFw] = useState<Framework | "all">("all");
   const [cat, setCat] = useState<Category | null>(null);
   const [selected, setSelected] = useState<ComponentMeta | null>(null);
   const [tab, setTab] = useState("components");
 
-  const inUse = useMemo(() => new Set(currentSpec ? Object.values(currentSpec.animations) : []), [currentSpec]);
-  // remocn has its own gallery tab; the Components tab lists the core engines
+  const inUse = useMemo(() => new Set(currentSpec ? [...Object.values(currentSpec.animations), ...(currentSpec.card ? [currentSpec.card] : [])] : []), [currentSpec]);
+  // remocn has its own gallery tab; the Components tab lists the core engines (and Onda)
   const core = useMemo(() => (registry?.components ?? []).filter((c) => c.framework !== "remocn"), [registry]);
   const remocn = useMemo(() => (registry?.components ?? []).filter((c) => c.framework === "remocn"), [registry]);
 
@@ -137,7 +140,7 @@ export function LibraryPanel({ registry, theme, currentSpec, currentIndex, onApp
                   <section key={c} aria-label={CATEGORY_LABEL[c]}>
                     <h3 className="mb-1.5 flex items-center justify-between px-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
                       {CATEGORY_LABEL[c]}
-                      <span className="font-normal normal-case">slot: {CATEGORY_SLOT[c]}</span>
+                      <span className="font-normal normal-case">{c === "card" ? "Onda · whole content block" : `slot: ${CATEGORY_SLOT[c]}`}</span>
                     </h3>
                     <ul className="flex flex-col gap-1.5">
                       {list.map((comp) => (
@@ -218,7 +221,15 @@ export function LibraryPanel({ registry, theme, currentSpec, currentIndex, onApp
         </TabsContent>
       </Tabs>
 
-      <ComponentDialog comp={selected} theme={theme} onClose={() => setSelected(null)} currentSpec={currentSpec} currentIndex={currentIndex} onApply={onApply} />
+      <ComponentDialog
+        comp={selected}
+        theme={theme}
+        onClose={() => setSelected(null)}
+        currentSpec={currentSpec}
+        currentIndex={currentIndex}
+        onApply={onApply}
+        onApplyCard={onApplyCard}
+      />
     </div>
   );
 }
@@ -245,16 +256,24 @@ function ComponentDialog({
   currentSpec,
   currentIndex,
   onApply,
+  onApplyCard,
 }: {
   comp: ComponentMeta | null;
   theme: string;
   onClose: () => void;
   currentSpec: SlideSpec | null;
   currentIndex: number;
-  onApply: (slot: string, id: string) => void;
+  onApply: (slot: string, id: string, layout?: string) => void;
+  onApplyCard: (id: string | null, name?: string) => void;
 }) {
-  const slot = comp ? CATEGORY_SLOT[comp.category] : null;
-  const current = currentSpec && slot ? currentSpec.animations[slot] : null;
+  // a chart is drawn on chart slides: a slide with numbers switches to the chart layout, one without can't take it
+  const chartSwitch = comp?.category === "chart" && !!currentSpec && currentSpec.layout !== "chart";
+  const noNumbers = chartSwitch && !currentSpec?.stats?.length;
+  const isCard = comp?.category === "card";
+  const slot = comp && comp.category !== "card" ? CATEGORY_SLOT[comp.category] : null;
+  // a card isn't an animation slot: the slide either shows this card, another card, or none
+  const current = currentSpec ? (isCard ? (currentSpec.card ?? null) : slot ? currentSpec.animations[slot] : null) : null;
+  const currentName = isCard && current ? `the ${current.split(".").pop()!.replace(/-/g, " ")}` : current;
   return (
     <Dialog open={!!comp} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-3xl">
@@ -292,21 +311,45 @@ function ComponentDialog({
             </div>
             <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs text-muted-foreground">
-                {currentSpec
-                  ? current === comp.id
-                    ? `Already used for “${slot}” on slide ${currentIndex + 1}.`
-                    : `Slide ${currentIndex + 1} “${slot}” currently uses ${current}.`
-                  : "Design a slide first to apply components to it."}
+                {!currentSpec
+                  ? "Design a slide first to apply components to it."
+                  : isCard
+                    ? current === comp.id
+                      ? `Slide ${currentIndex + 1} shows this card, filled with its own words.`
+                      : current
+                        ? `Slide ${currentIndex + 1} shows ${currentName}: this card replaces it.`
+                        : `The card is filled with slide ${currentIndex + 1}'s words. No AI step.`
+                    : noNumbers
+                      ? `Slide ${currentIndex + 1} has no numbers to chart. Pick a slide with numbers, or ask the AI for a chart slide.`
+                      : chartSwitch
+                        ? `Slide ${currentIndex + 1} becomes a chart slide: its numbers are drawn with this chart.`
+                        : current === comp.id
+                          ? `Already used for “${slot}” on slide ${currentIndex + 1}.`
+                          : `Slide ${currentIndex + 1} “${slot}” currently uses ${current}.`}
               </p>
-              <Button
-                disabled={!currentSpec || current === comp.id}
-                onClick={() => {
-                  onApply(slot!, comp.id);
-                  onClose();
-                }}
-              >
-                <Wand2 /> Apply to slide {currentIndex + 1}
-              </Button>
+              <div className="flex gap-2">
+                {isCard && currentSpec && current === comp.id && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      onApplyCard(null);
+                      onClose();
+                    }}
+                  >
+                    Remove from slide {currentIndex + 1}
+                  </Button>
+                )}
+                <Button
+                  disabled={!currentSpec || noNumbers || (current === comp.id && !chartSwitch)}
+                  onClick={() => {
+                    if (isCard) onApplyCard(comp.id, comp.name);
+                    else onApply(slot!, comp.id, chartSwitch ? "chart" : undefined);
+                    onClose();
+                  }}
+                >
+                  <Wand2 /> {isCard ? "Add" : "Apply"} to slide {currentIndex + 1}
+                </Button>
+              </div>
             </div>
           </>
         )}

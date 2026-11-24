@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { listMedia } from "@/lib/assets";
 import type { SlideSpec } from "@/runtime/types";
 import type { Message, Mood, Project, ProjectMode, ProjectStage, ProjectSummary, Slide, SlideBrief, SlideStatus } from "@/lib/types";
+import { parseStartOptions, type StartOptions } from "@/lib/start-options";
 
 interface ProjectRow {
   id: string;
@@ -15,6 +16,7 @@ interface ProjectRow {
   stage: ProjectStage;
   current_index: number;
   source_name: string | null;
+  options_json: string;
   created_at: string;
   updated_at: string;
 }
@@ -41,7 +43,7 @@ const now = () => new Date().toISOString();
 
 const stmt = {
   insertProject: db.prepare(
-    `INSERT INTO projects (id, title, mode, prompt, theme, mood, stage, source_name) VALUES (@id, @title, @mode, @prompt, @theme, @mood, @stage, @source_name)`,
+    `INSERT INTO projects (id, title, mode, prompt, theme, mood, stage, source_name, options_json) VALUES (@id, @title, @mode, @prompt, @theme, @mood, @stage, @source_name, @options_json)`,
   ),
   getProject: db.prepare(`SELECT * FROM projects WHERE id = ?`),
   listProjects: db.prepare(`
@@ -75,7 +77,16 @@ function mapMessage(r: MessageRow): Message {
   return { id: r.id, role: r.role, kind: r.kind, content: r.content, meta: r.meta_json ? JSON.parse(r.meta_json) : null, createdAt: r.created_at };
 }
 
-export function createProject(input: { title: string; mode: ProjectMode; prompt?: string; theme?: string; mood?: Mood; stage?: ProjectStage; sourceName?: string }): string {
+export function createProject(input: {
+  title: string;
+  mode: ProjectMode;
+  prompt?: string;
+  theme?: string;
+  mood?: Mood;
+  stage?: ProjectStage;
+  sourceName?: string;
+  options?: StartOptions;
+}): string {
   const id = nanoid(12);
   stmt.insertProject.run({
     id,
@@ -86,8 +97,17 @@ export function createProject(input: { title: string; mode: ProjectMode; prompt?
     mood: input.mood ?? "energetic",
     stage: input.stage ?? "outline",
     source_name: input.sourceName ?? null,
+    options_json: JSON.stringify(input.options ?? {}),
   });
   return id;
+}
+
+function readOptions(json: string | undefined): StartOptions {
+  try {
+    return parseStartOptions(JSON.parse(json || "{}"));
+  } catch {
+    return {};
+  }
 }
 
 export function getProject(id: string): Project | null {
@@ -103,6 +123,7 @@ export function getProject(id: string): Project | null {
     stage: p.stage,
     currentIndex: p.current_index,
     sourceName: p.source_name,
+    options: readOptions(p.options_json),
     createdAt: p.created_at,
     updatedAt: p.updated_at,
     slides: (stmt.slides.all(id) as SlideRow[]).map(mapSlide),

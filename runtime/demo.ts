@@ -12,7 +12,10 @@ export const DEFAULT_ANIMATIONS: SlideAnimations = {
   transition: "remotion.transition.slide",
 };
 
-export const CATEGORY_SLOT: Record<Category, Slot> = {
+/** Categories that fill an animation slot (Onda cards are whole content blocks, not a slot). */
+export type SlotCategory = Exclude<Category, "card">;
+/** Animation slot of each category. */
+export const CATEGORY_SLOT: Record<SlotCategory, Slot> = {
   text: "title",
   entrance: "body",
   list: "items",
@@ -24,7 +27,7 @@ export const CATEGORY_SLOT: Record<Category, Slot> = {
   scene: "scene",
 };
 
-const DEMO_LAYOUT: Record<Category, Layout> = {
+const DEMO_LAYOUT: Record<Exclude<Category, "card">, Layout> = {
   text: "hero",
   entrance: "split-image",
   list: "title-bullets",
@@ -70,10 +73,50 @@ export function demoSlide(layout: Layout, animations: Partial<SlideAnimations> =
   return base;
 }
 
+/** Showcase slide for an Onda card: content that fills it the way a real slide would. */
+function demoCardSlide(cardId: string): SlideSpec {
+  const anim = { background: "motion.bg.aurora", decor: "motion.decor.floating-shapes" };
+  switch (cardId) {
+    case "onda.card.bento-grid":
+      return {
+        ...demoSlide("cards", anim, "Everything in one place"),
+        subtitle: "Onda bento grid, filled with this slide's cards",
+        body: undefined,
+        items: [
+          { heading: "Describe it", text: "Type an idea, a lesson or a product: the AI plans the story." },
+          { heading: "80 effects", text: "Remotion, anime.js, Motion and GSAP." },
+          { heading: "Offline", text: "One standalone HTML file." },
+          { heading: "Review", text: "Approve each slide or ask for changes." },
+          { heading: "Any screen", text: "Video, web page or phone." },
+        ],
+        card: cardId,
+      };
+    case "onda.card.pricing-card":
+      return {
+        ...demoSlide("title-bullets", anim, "Simple pricing"),
+        subtitle: "Everything you need to make your first video",
+        body: undefined,
+        bullets: ["Unlimited videos", "All 80 animation effects", "Export to HTML and web page", "Priority support"],
+        stats: [{ value: "$29", label: "Pro /month" }],
+        card: cardId,
+      };
+    case "onda.card.skeleton-card":
+      return { ...demoSlide("title-bullets", anim, "Your video is on its way"), subtitle: "The AI is designing each slide", body: undefined, card: cardId };
+    default:
+      return {
+        ...demoSlide("hero", anim, "Motion that tells a story"),
+        subtitle: "Feature",
+        body: "Every slide is built from modular animation components, now with Onda cards.",
+        card: cardId,
+      };
+  }
+}
+
 /** A short video showcasing a single registry component (used for library previews). */
 export function demoVideo(componentId: string, theme = "midnight"): VideoSpec | null {
   const meta = getComponent(componentId);
   if (!meta) return null;
+  if (meta.category === "card") return { title: meta.name, theme, slides: [{ ...demoCardSlide(meta.id), duration: 5 }], autoplay: true, loop: true, badge: meta.id };
   const slot = CATEGORY_SLOT[meta.category];
   const layout = DEMO_LAYOUT[meta.category];
   const anim = { [slot]: componentId } as Partial<SlideAnimations>;

@@ -1,14 +1,15 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Check, Download, Film, Loader2, Paperclip, RefreshCw, SendHorizontal, TriangleAlert, CircleCheck, ListChecks, Sparkles, MessageCircleQuestion, X, Clapperboard } from "lucide-react";
+import { Bot, Check, Download, Film, Loader2, Paperclip, Plus, RefreshCw, SendHorizontal, TriangleAlert, CircleCheck, ListChecks, Sparkles, MessageCircleQuestion, X, Clapperboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { isMediaFile, mediaUrl } from "@/lib/client/api";
+import { isMediaFile, mediaUrl, type LlmProvider } from "@/lib/client/api";
 import type { Studio } from "@/hooks/use-studio";
 import type { Message, Project } from "@/lib/types";
+import { hasStartOptions, parseStartOptions, startOptionsLabel } from "@/lib/start-options";
 import type { Framework } from "@/runtime/types";
 import { FrameworkDot } from "./library-panel";
 import { PHASE_LABEL } from "./model-status";
@@ -32,7 +33,9 @@ function Rich({ text }: { text: string }) {
   );
 }
 
-export function ChatPanel({ studio, llmOnline }: { studio: Studio; llmOnline: boolean | null }) {
+const CLOUD_NAME: Record<Exclude<LlmProvider, "local">, string> = { anthropic: "Claude", openai: "ChatGPT" };
+
+export function ChatPanel({ studio, llmOnline, llmProvider }: { studio: Studio; llmOnline: boolean | null; llmProvider: LlmProvider }) {
   const { project, busy } = studio;
   const [text, setText] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
@@ -62,7 +65,9 @@ export function ChatPanel({ studio, llmOnline }: { studio: Studio; llmOnline: bo
         ? project.mode === "upload"
           ? "Type “approve” to start designing…"
           : "Approve, or say what to change in the outline…"
-        : `Feedback for slide ${studio.previewIndex + 1} — or “approve”…`;
+        : project.stage === "complete"
+          ? `Feedback for slide ${studio.previewIndex + 1} — or click “New video” to start another`
+          : `Feedback for slide ${studio.previewIndex + 1} — or “approve”…`;
 
   const submit = () => {
     if ((!text.trim() && !attached.length) || busy) return;
@@ -94,14 +99,28 @@ export function ChatPanel({ studio, llmOnline }: { studio: Studio; llmOnline: bo
             </p>
             {llmOnline === false && (
               <p className="mt-2 flex items-start gap-1.5 text-amber-300/90">
-                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" /> The local model is offline — I&apos;ll use the rule-based designer. Start it with <code className="font-mono">npm run llm</code>.
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                {llmProvider !== "local" ? (
+                  <span>
+                    {CLOUD_NAME[llmProvider]} isn&apos;t reachable — I&apos;ll use the rule-based designer. Check the API key in the model settings (click the model status at the top).
+                  </span>
+                ) : (
+                  <span>
+                    The local model is offline — I&apos;ll use the rule-based designer. Start it with <code className="font-mono">npm run llm</code>.
+                  </span>
+                )}
               </p>
             )}
           </AssistantBubble>
 
           {messages.map((m) =>
             m.role === "user" ? (
-              <UserBubble key={m.id} text={m.content} media={project ? ((m.meta?.media as string[] | undefined) ?? []).map((ref) => ({ ref, url: mediaUrl(project.id, ref), kind: project.media.find((x) => x.ref === ref)?.kind, name: project.media.find((x) => x.ref === ref)?.name })) : []} />
+              <UserBubble
+                key={m.id}
+                text={m.content}
+                options={m.meta?.options}
+                media={project ? ((m.meta?.media as string[] | undefined) ?? []).map((ref) => ({ ref, url: mediaUrl(project.id, ref), kind: project.media.find((x) => x.ref === ref)?.kind, name: project.media.find((x) => x.ref === ref)?.name })) : []}
+              />
             ) : (
               <AssistantMessage
                 key={m.id}
@@ -224,7 +243,8 @@ function Elapsed({ since }: { since: number }) {
   return <span className="text-muted-foreground tabular-nums">· {Math.max(0, Math.round((now - since) / 1000))}s</span>;
 }
 
-function UserBubble({ text, media = [] }: { text: string; media?: { ref: string; url: string; kind?: string; name?: string }[] }) {
+function UserBubble({ text, options, media = [] }: { text: string; options?: unknown; media?: { ref: string; url: string; kind?: string; name?: string }[] }) {
+  const opts = parseStartOptions(options);
   return (
     <div className="ml-8 flex flex-col items-end gap-1 self-end">
       {media.length > 0 && (
@@ -241,7 +261,11 @@ function UserBubble({ text, media = [] }: { text: string; media?: { ref: string;
           )}
         </div>
       )}
-      <div className="rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm whitespace-pre-wrap text-primary-foreground">{text}</div>
+      <div className="rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-sm whitespace-pre-wrap text-primary-foreground">
+        {text}
+        {/* "Start faster" options picked on the start screen */}
+        {hasStartOptions(opts) && <span className="mt-1 block text-[11px] opacity-80">{startOptionsLabel(opts)}</span>}
+      </div>
     </div>
   );
 }
@@ -280,7 +304,7 @@ function AssistantBubble({ children, className }: { children: React.ReactNode; c
 function AssistantMessage({ m, project, studio, actionable, onRevise }: { m: Message; project: Project; studio: Studio; actionable: boolean; onRevise: (v: string) => void }) {
   const warn = m.meta && m.meta.usedLlm === false && project.mode === "prompt" ? (
     <p className="mt-2 flex items-start gap-1.5 text-[11px] text-amber-300/90">
-      <TriangleAlert className="mt-px size-3 shrink-0" /> Local model unavailable — used the rule-based designer.
+      <TriangleAlert className="mt-px size-3 shrink-0" /> Model unavailable — used the rule-based designer.
     </p>
   ) : null;
 
@@ -398,6 +422,9 @@ function AssistantMessage({ m, project, studio, actionable, onRevise }: { m: Mes
             <a href={`/api/projects/${project.id}/export`} download>
               <Download /> Export HTML
             </a>
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => studio.openProject(null)}>
+            <Plus /> New video
           </Button>
         </div>
       </AssistantBubble>

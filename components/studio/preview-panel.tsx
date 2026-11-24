@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Clapperboard, Download, Film, Loader2, Play, Sparkles, Upload, Clock, Layers, ChevronDown, Square, Monitor, Tablet, Smartphone, RotateCw, Globe } from "lucide-react";
+import { Clapperboard, Download, Film, Loader2, Play, Sparkles, Upload, Clock, Layers, ChevronDown, Square, Monitor, Tablet, Smartphone, RotateCw, Globe, GraduationCap, Lightbulb, Rocket, ChartColumn, Pencil, type LucideIcon } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,11 +13,25 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { Registry } from "@/lib/client/api";
 import type { Studio } from "@/hooks/use-studio";
-import type { ProjectSummary } from "@/lib/types";
+import { MOODS, type Mood, type ProjectSummary } from "@/lib/types";
+import {
+  AUDIENCES,
+  LANGUAGES,
+  SLIDE_COUNTS,
+  TEMPLATES,
+  getTemplate,
+  hasStartOptions,
+  startOptionsLabel,
+  type Audience,
+  type Language,
+  type StartOptions,
+  type TemplateId,
+} from "@/lib/start-options";
 import { FrameworkDot } from "./library-panel";
 import { STYLES, STYLE_INFO, type Framework, type Slot } from "@/runtime/types";
 import { slotsFor } from "@/runtime/layouts";
 import { DeviceFrame, type Device } from "./device-frame";
+import { TextEditorDialog, type TextTarget } from "./text-editor";
 
 const STATUS_STYLE = {
   pending: "bg-muted-foreground/40",
@@ -31,14 +46,40 @@ export function PreviewPanel({ studio, registry, recent }: { studio: Studio; reg
   const [landscape, setLandscape] = useState(false);
   // output format: timed video player, or a scrolling animated web page built from the same designs
   const [format, setFormat] = useState<"video" | "web">("video");
+  // click-to-edit: the preview iframe reports which text was clicked (see runtime/index.ts, enableTextEditing)
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const [editing, setEditing] = useState<{ index: number; target: TextTarget; key: number } | null>(null);
+  const isBusy = !!busy;
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const frame = frameRef.current;
+      if (!frame || e.source !== frame.contentWindow) return; // only our own preview
+      const d = e.data as { type?: unknown; slide?: unknown; field?: unknown; i?: unknown } | null;
+      if (d?.type !== "pm:editText" || typeof d.slide !== "number") return;
+      if (isBusy) {
+        toast.info("The AI is working: edit the text when it's done.");
+        return;
+      }
+      frame.contentWindow?.postMessage({ type: "pm:pause" }, "*");
+      setEditing({ index: d.slide, target: { field: typeof d.field === "string" ? d.field : undefined, i: typeof d.i === "number" ? d.i : undefined }, key: Date.now() });
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [isBusy]);
   if (!project) return <Landing studio={studio} recent={recent} />;
+
+  const openEditor = (index: number) => {
+    frameRef.current?.contentWindow?.postMessage({ type: "pm:pause" }, "*");
+    setEditing({ index, target: {}, key: Date.now() });
+  };
+  const editingSpec = editing ? project.slides[editing.index]?.spec : null;
 
   const slide = project.slides[previewIndex];
   const designed = project.slides.filter((s) => s.spec).length;
   const approved = project.slides.filter((s) => s.status === "approved").length;
   const canPreview = scope === "all" || format === "web" ? designed > 0 : !!slide?.spec;
   const src = canPreview
-    ? `/api/projects/${project.id}/preview?scope=${scope}&index=${previewIndex}&format=${format}&v=${encodeURIComponent(project.updatedAt + project.theme)}`
+    ? `/api/projects/${project.id}/preview?scope=${scope}&index=${previewIndex}&format=${format}&edit=1&v=${encodeURIComponent(project.updatedAt + project.theme)}`
     : null;
   const busyHere = busy && (busy.kind !== "slide" || busy.index === previewIndex || scope === "all");
 
@@ -156,6 +197,7 @@ export function PreviewPanel({ studio, registry, recent }: { studio: Studio; reg
             <>
               {src ? (
                 <iframe
+                  ref={frameRef}
                   key={`${src}|${device}|${landscape}`}
                   src={src}
                   title={`Video preview (${device})`}
@@ -210,6 +252,10 @@ export function PreviewPanel({ studio, registry, recent }: { studio: Studio; reg
         </ScrollArea>
         {slide?.spec && scope === "slide" && (
           <div className="flex flex-wrap items-center gap-1.5 border-t px-4 py-2 text-[11px]">
+            <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[11px]" onClick={() => openEditor(previewIndex)} disabled={!!busy} title="Or click any text in the preview">
+              <Pencil className="size-3" /> Edit text
+            </Button>
+            <span className="mr-1 text-muted-foreground">or click any text in the preview</span>
             <Badge variant="outline" className="gap-1 text-[11px]">
               <Layers className="size-3" /> {slide.spec.layout}
             </Badge>
@@ -250,6 +296,21 @@ export function PreviewPanel({ studio, registry, recent }: { studio: Studio; reg
           </div>
         )}
       </div>
+
+      {editing && editingSpec && (
+        <TextEditorDialog
+          key={editing.key}
+          spec={editingSpec}
+          slideNumber={editing.index + 1}
+          target={editing.target}
+          onSave={(text) => studio.editSlideText(editing.index, text)}
+          onClose={() => {
+            setEditing(null);
+            // resume the paused preview (after a save it reloads and plays anyway)
+            frameRef.current?.contentWindow?.postMessage({ type: "pm:play" }, "*");
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -293,18 +354,94 @@ function BusyOverlay({ status, tokens, startedAt, onCancel, dim }: { status: str
   );
 }
 
-const EXAMPLES = [
-  "A 5-slide launch video for 'Nimbus', an AI note-taking app: problem, 3 key features, pricing from $8/month, call to action.",
-  "Explain how solar panels turn sunlight into electricity in 4 slides, with a stats slide (efficiency 22%, cost down 89% since 2010).",
-  "Quarterly business review: revenue $4.2M (+38%), 1,200 new customers, churn 2.1%, roadmap for next quarter.",
+type ExampleCategory = "School" | "Business" | "Marketing";
+const EXAMPLE_CATEGORIES: ExampleCategory[] = ["School", "Business", "Marketing"];
+const EXAMPLES: { category: ExampleCategory; text: string; options: StartOptions }[] = [
+  { category: "School", text: "Explain the atomic model for 9th graders: Dalton, Thomson, Rutherford, Bohr and the modern model.", options: { template: "lesson" } },
+  { category: "School", text: "How the water cycle works: evaporation, condensation, precipitation and collection.", options: { template: "lesson", audience: "Kids", mood: "playful" } },
+  {
+    category: "School",
+    text: "Explain how solar panels turn sunlight into electricity, with a stats slide (efficiency 22%, cost down 89% since 2010).",
+    options: { template: "explainer", audience: "Students" },
+  },
+  { category: "Business", text: "Quarterly business review: revenue $4.2M (+38%), 1,200 new customers, churn 2.1%, roadmap for next quarter.", options: { template: "report" } },
+  {
+    category: "Business",
+    text: "Onboarding for new employees: our mission, how the teams work together, the tools we use, the first-week checklist.",
+    options: { template: "explainer", audience: "Professionals" },
+  },
+  { category: "Business", text: "Our new expense policy: what is covered, spending limits, how to submit receipts, approval times.", options: { template: "explainer", audience: "Professionals" } },
+  {
+    category: "Marketing",
+    text: "Launch video for 'Nimbus', an AI note-taking app: the problem, 3 key features, pricing from $8/month, call to action.",
+    options: { template: "launch" },
+  },
+  { category: "Marketing", text: "3 quick tips to sleep better tonight, ending with 'Follow for more'.", options: { template: "reel" } },
+  { category: "Marketing", text: "Black Friday sale: 40% off all plans until Sunday, 3 reasons to upgrade now, code BF40.", options: { template: "reel", mood: "bold" } },
 ];
+
+const TEMPLATE_ICON: Record<TemplateId, LucideIcon> = { lesson: GraduationCap, explainer: Lightbulb, launch: Rocket, reel: Smartphone, report: ChartColumn };
+
+/** Template defaults (audience, length, mood) first, then explicit choices. */
+function withTemplate(id: TemplateId | undefined, extra: StartOptions = {}): StartOptions {
+  const t = getTemplate(id);
+  return { ...(t ? { template: t.id, audience: t.audience, slides: t.slides, mood: t.mood } : {}), ...extra };
+}
+
+const AUTO = "auto";
+function OptionSelect({
+  label,
+  value,
+  items,
+  autoLabel = "Auto",
+  onChange,
+  disabled,
+}: {
+  label: string;
+  value: string | undefined;
+  items: { value: string; label: string }[];
+  autoLabel?: string;
+  onChange: (value: string | undefined) => void;
+  disabled?: boolean;
+}) {
+  const shown = items.find((i) => i.value === value)?.label ?? autoLabel;
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
+      <Select value={value ?? AUTO} onValueChange={(v) => onChange(v === AUTO ? undefined : v)} disabled={disabled}>
+        <SelectTrigger size="sm" className="h-8 w-full text-xs" aria-label={label}>
+          {/* explicit text: always shows the current choice, even before the list has been opened */}
+          <SelectValue>{shown}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={AUTO} className="text-xs">
+            {autoLabel}
+          </SelectItem>
+          {items.map((i) => (
+            <SelectItem key={i.value} value={i.value} className="text-xs">
+              {i.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 function Landing({ studio, recent }: { studio: Studio; recent: ProjectSummary[] }) {
   const [prompt, setPrompt] = useState("");
+  const [opts, setOpts] = useState<StartOptions>({});
+  const [category, setCategory] = useState<ExampleCategory>("School");
   const [drag, setDrag] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const busy = !!studio.busy;
-  const submit = () => prompt.trim().length >= 3 && studio.start(prompt.trim());
+  const template = getTemplate(opts.template);
+  const submit = () => prompt.trim().length >= 3 && studio.start(prompt.trim(), hasStartOptions(opts) ? opts : undefined);
+  // picking a template fills in its audience / length / mood; picking it again clears them (the language stays)
+  const pickTemplate = (id: TemplateId) => setOpts((o) => (o.template === id ? { language: o.language } : withTemplate(id, { language: o.language })));
+  const set = (patch: StartOptions) => setOpts((o) => ({ ...o, ...patch }));
 
   return (
     <ScrollArea className="h-full">
@@ -315,7 +452,7 @@ function Landing({ studio, recent }: { studio: Studio; recent: ProjectSummary[] 
           </Badge>
           <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">Turn a prompt or your slides into an animated video — as one HTML file.</h1>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            A local model plans the story, then designs each slide from Remotion, anime.js, Motion and GSAP components. You approve or redesign every slide before moving on.
+            An AI model (Claude or a local model) plans the story, then designs each slide from Remotion, anime.js, Motion and GSAP components. You approve or redesign every slide before moving on.
           </p>
         </div>
 
@@ -324,6 +461,33 @@ function Landing({ studio, recent }: { studio: Studio; recent: ProjectSummary[] 
             <label htmlFor="landing-prompt" className="flex items-center gap-2 text-sm font-medium">
               <Sparkles className="size-4 text-primary" /> Generate from a prompt
             </label>
+            <div className="flex flex-col gap-1.5">
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Start from a template (optional)">
+                {TEMPLATES.map((t) => {
+                  const Icon = TEMPLATE_ICON[t.id];
+                  const on = opts.template === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      aria-pressed={on}
+                      title={t.description}
+                      onClick={() => pickTemplate(t.id)}
+                      disabled={busy}
+                      className={cn(
+                        "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors hover:border-primary/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60",
+                        on ? "border-primary bg-primary/15 text-foreground" : "text-muted-foreground",
+                      )}
+                    >
+                      <Icon className="size-3.5" /> {t.name}
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="text-[11px] text-muted-foreground">
+                {template ? `${template.name}: ${template.description.toLowerCase()}. Change any option below.` : "Pick a template to fill in good defaults, or just describe your video."}
+              </span>
+            </div>
             <Textarea
               id="landing-prompt"
               value={prompt}
@@ -331,13 +495,40 @@ function Landing({ studio, recent }: { studio: Studio; recent: ProjectSummary[] 
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
               }}
-              placeholder="Describe the video: topic, audience, number of slides, key facts…"
+              placeholder={template?.placeholder ?? "Describe the video: topic, audience, number of slides, key facts…"}
               className="min-h-28 resize-none text-sm"
               disabled={busy}
             />
+            <div className="grid grid-cols-2 gap-2">
+              <OptionSelect
+                label="Audience"
+                value={opts.audience}
+                items={AUDIENCES.map((a) => ({ value: a, label: a }))}
+                onChange={(v) => set({ audience: v as Audience | undefined })}
+                disabled={busy}
+              />
+              <OptionSelect
+                label="Length"
+                value={opts.slides?.toString()}
+                items={SLIDE_COUNTS.map((n) => ({ value: String(n), label: `${n} slides` }))}
+                onChange={(v) => set({ slides: v ? Number(v) : undefined })}
+                disabled={busy}
+              />
+              <OptionSelect label="Mood" value={opts.mood} items={MOODS.map((m) => ({ value: m, label: capitalize(m) }))} onChange={(v) => set({ mood: v as Mood | undefined })} disabled={busy} />
+              <OptionSelect
+                label="Language"
+                value={opts.language}
+                autoLabel="English"
+                items={LANGUAGES.filter((l) => l !== "English").map((l) => ({ value: l, label: l }))}
+                onChange={(v) => set({ language: v as Language | undefined })}
+                disabled={busy}
+              />
+            </div>
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] text-muted-foreground">Ctrl/⌘ + Enter</span>
-              <Button onClick={submit} disabled={busy || prompt.trim().length < 3}>
+              <span className="min-w-0 text-[11px] leading-snug text-muted-foreground" title={hasStartOptions(opts) ? startOptionsLabel(opts) : undefined}>
+                {hasStartOptions(opts) ? startOptionsLabel(opts) : "Ctrl/⌘ + Enter"}
+              </span>
+              <Button onClick={submit} disabled={busy || prompt.trim().length < 3} title="Ctrl/⌘ + Enter">
                 {busy ? <Loader2 className="animate-spin" /> : <Sparkles />} Plan my video
               </Button>
             </div>
@@ -382,17 +573,48 @@ function Landing({ studio, recent }: { studio: Studio; recent: ProjectSummary[] 
         </div>
 
         <div className="flex flex-col gap-2">
-          <span className="text-xs font-medium text-muted-foreground">Try an example</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground">Try an example</span>
+            <div className="flex gap-1" role="group" aria-label="Example category">
+              {EXAMPLE_CATEGORIES.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  aria-pressed={category === c}
+                  onClick={() => setCategory(c)}
+                  className={cn(
+                    "rounded-full px-2.5 py-0.5 text-[11px] transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                    category === c ? "bg-primary/15 text-foreground" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="grid gap-2 sm:grid-cols-3">
-            {EXAMPLES.map((ex) => (
-              <button
-                key={ex}
-                onClick={() => setPrompt(ex)}
-                className="rounded-lg border bg-card/40 p-3 text-left text-[11px] leading-snug text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              >
-                {ex}
-              </button>
-            ))}
+            {EXAMPLES.filter((ex) => ex.category === category).map((ex) => {
+              const t = getTemplate(ex.options.template);
+              const Icon = t ? TEMPLATE_ICON[t.id] : Sparkles;
+              return (
+                <button
+                  key={ex.text}
+                  onClick={() => {
+                    setPrompt(ex.text);
+                    setOpts((o) => withTemplate(ex.options.template, { language: o.language, ...ex.options }));
+                  }}
+                  disabled={busy}
+                  className="flex flex-col gap-1.5 rounded-lg border bg-card/40 p-3 text-left text-[11px] leading-snug text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:opacity-60"
+                >
+                  {t && (
+                    <span className="flex items-center gap-1 text-[10px] font-medium text-foreground/80">
+                      <Icon className="size-3" /> {t.name}
+                    </span>
+                  )}
+                  {ex.text}
+                </button>
+              );
+            })}
           </div>
         </div>
 

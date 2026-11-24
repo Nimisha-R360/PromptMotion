@@ -69,6 +69,15 @@ html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:var(-
 .pm-step{position:relative;display:flex;flex-direction:column;gap:16px;padding-right:20px}
 .pm-step .pm-badge{border-radius:50%;box-shadow:0 0 0 10px var(--pm-bg)}
 
+/* Onda cards (runtime/onda): the host is the slot the card is zoomed to fit */
+.pm-card-host{position:relative;min-width:0;min-height:0}
+.pm-card-full{flex:1;align-self:stretch}
+.pm-card-list{flex:1;align-self:stretch;margin-top:8px}
+.pm-content.pm-with-card{flex-direction:row;align-items:center;gap:72px;text-align:left}
+.pm-with-card .pm-card-col{flex:1 1 0;min-width:0;align-items:flex-start}
+.pm-with-card .pm-pills{justify-content:flex-start}
+.pm-card-side{flex:1 1 0;align-self:stretch}
+
 /* quote */
 .pm-l-quote .pm-content{padding:140px 220px}
 .pm-quote{margin:0;position:relative}
@@ -135,6 +144,9 @@ html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:var(-
 .pm-portrait .pm-timeline{grid-template-columns:1fr!important;gap:44px;padding-top:0}
 .pm-portrait .pm-timeline::before{left:30px;right:auto;top:10px;bottom:10px;width:4px;height:auto}
 .pm-portrait .pm-step{display:grid;grid-template-columns:64px 1fr;column-gap:32px;row-gap:8px;padding-right:0}
+.pm-portrait .pm-content.pm-with-card{flex-direction:column;align-items:stretch;gap:48px}
+.pm-portrait .pm-with-card .pm-card-col{flex:none}
+.pm-portrait .pm-card-side{flex:1 1 0;min-height:560px}
 .pm-portrait .pm-l-quote .pm-content{padding:200px 110px}
 .pm-portrait .pm-quote p{font-size:60px}
 .pm-portrait .pm-qmark{position:static;display:block;height:150px;margin-bottom:10px;font-size:240px}

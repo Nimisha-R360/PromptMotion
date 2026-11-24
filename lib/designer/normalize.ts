@@ -4,6 +4,7 @@ import { DEFAULT_ANIMATIONS } from "@/runtime/demo";
 import { LAYOUTS, STYLES, SLOT_CATEGORY, type Framework, type Item, type Layout, type SlideAnimations, type SlideSpec, type Slot, type Stat } from "@/runtime/types";
 import type { Mood, SlideBrief } from "@/lib/types";
 import { LAYOUT_GROUP } from "./schema";
+import { isCardId } from "@/runtime/cards";
 
 const ENGINES: Framework[] = ["gsap", "anime", "motion", "remotion"];
 export const engineForIndex = (i: number) => ENGINES[i % ENGINES.length];
@@ -24,7 +25,7 @@ export function pickAnimations(opts: { mood: Mood; seed: number; prefer?: Framew
   const r = rng(opts.seed);
   const out = { ...DEFAULT_ANIMATIONS };
   (Object.keys(SLOT_CATEGORY) as Slot[]).forEach((slot, si) => {
-    const pool = COMPONENTS.filter((c) => c.category === SLOT_CATEGORY[slot] && !opts.avoid?.includes(c.id));
+    const pool = COMPONENTS.filter((c) => c.category === SLOT_CATEGORY[slot] && c.framework !== "onda" && !opts.avoid?.includes(c.id));
     const moodPool = pool.filter((c) => c.mood.includes(opts.mood));
     const base = moodPool.length ? moodPool : pool;
     // alternate preferred engine on some slots so each slide mixes engines
@@ -198,5 +199,7 @@ export function normalizeSpec(
     style: (STYLES as readonly string[]).includes(raw.style as string) ? (raw.style as SlideSpec["style"]) : undefined,
     duration: Math.round(duration * 2) / 2,
     note: clean(raw.note, 200) || undefined,
+    // an Onda card the user put on the slide stays through layout changes
+    ...(isCardId(raw.card) ? { card: raw.card } : {}),
   };
 }

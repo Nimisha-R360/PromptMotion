@@ -1,6 +1,6 @@
 // Shared types between the Next.js server (LLM, composer) and the in-page player runtime.
 
-export type Framework = "remotion" | "anime" | "motion" | "gsap" | "remocn";
+export type Framework = "remotion" | "anime" | "motion" | "gsap" | "remocn" | "onda";
 
 export type Category =
   | "text" // headline / title effects (split chars/words)
@@ -11,7 +11,8 @@ export type Category =
   | "background" // full-bleed animated backdrop
   | "decor" // SVG shapes / ornaments
   | "transition" // scene-to-scene transition
-  | "scene"; // full-frame remocn scene (product UI, mockup, chart, template…) on a "showcase" slide
+  | "scene" // full-frame remocn scene (product UI, mockup, chart, template…) on a "showcase" slide
+  | "card"; // Onda card components (whole content blocks, not an animation slot)
 
 /** Animation slots on a slide; each maps to one registry category. */
 export type Slot = "title" | "body" | "items" | "number" | "chart" | "background" | "decor" | "transition" | "scene";
@@ -107,6 +108,8 @@ export interface SlideSpec {
   animations: SlideAnimations;
   /** visual treatment; when omitted the player rotates styles by slide index */
   style?: SlideStyle;
+  /** an Onda card drawn on this slide (runtime/cards.ts), filled with the slide's words */
+  card?: string;
   /** seconds */
   duration: number;
   note?: string;
@@ -125,4 +128,8 @@ export interface VideoSpec {
   focus?: number;
   /** demo mode label shown in corner (library previews) */
   badge?: string;
+  /** studio preview only: clicking a text tells the parent window which text to edit (never set in exports) */
+  editable?: boolean;
+  /** studio preview only: project slide index of each entry in `slides` */
+  refs?: number[];
 }

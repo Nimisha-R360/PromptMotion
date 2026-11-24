@@ -9,7 +9,13 @@ import { resolveAssets } from "@/lib/assets";
  *  - scope "all": every designed slide (approved + in review)
  *  - scope "approved": only approved slides (export)
  */
-export function buildVideoSpec(project: Project, scope: "slide" | "all" | "approved", index = 0, format: "video" | "web" = "video"): VideoSpec | null {
+export function buildVideoSpec(
+  project: Project,
+  scope: "slide" | "all" | "approved",
+  index = 0,
+  format: "video" | "web" = "video",
+  opts: { editable?: boolean } = {},
+): VideoSpec | null {
   // a web page always shows every designed section; the selected slide is scrolled into view
   if (format === "web" && scope === "slide") scope = "all";
   const pick = project.slides.filter((s) => {
@@ -29,5 +35,7 @@ export function buildVideoSpec(project: Project, scope: "slide" | "all" | "appro
     autoplay: true,
     loop: scope === "slide",
     focus: focus != null && focus >= 0 ? focus : undefined,
+    // studio preview: clicking a text opens the text editor for that slide
+    ...(opts.editable ? { editable: true, refs: pick.map((s) => s.index) } : {}),
   };
 }

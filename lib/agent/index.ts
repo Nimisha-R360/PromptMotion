@@ -10,6 +10,7 @@ import { SLOT_CATEGORY, type Slot } from "@/runtime/types";
 import { slotsFor } from "@/runtime/layouts";
 import { THEMES } from "@/runtime/themes";
 import type { Project } from "@/lib/types";
+import { hasStartOptions, startOptionsLabel } from "@/lib/start-options";
 
 /**
  * Director agent (Strands Agents SDK + local llama.cpp model).
@@ -83,6 +84,7 @@ export function stateBlock(p: Project, inView: number): string {
   return [
     `PROJECT STATE`,
     `title: ${p.title} | source: ${p.mode === "upload" ? "uploaded slides" : "prompt"} | theme: ${p.theme} | mood: ${p.mood}`,
+    hasStartOptions(p.options) ? `chosen at start: ${startOptionsLabel(p.options)}` : "",
     `stage: ${stage} | waiting for: ${waiting} | slide in view: ${inView + 1}`,
     p.slides.length ? `slides:\n${lines.join("\n")}` : "slides: none yet",
     media.length ? `MEDIA uploaded by the user:\n${media.join("\n")}` : "",

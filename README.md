@@ -35,6 +35,21 @@ If the model is offline, the app still works: a rule-based designer takes over, 
 | `LLM_TIMEOUT_MS` | `240000` | per request |
 | `DATA_DIR` | `./data` | SQLite DB + uploaded images |
 
+### Use Claude or ChatGPT instead of the local model
+
+Click the model status in the header to open the model settings: pick **Claude** or **ChatGPT** and paste an API key.
+The choice and keys are stored in the local database (`app_settings`), never sent to the browser. Environment
+variables work too (in `.env.local`, which git ignores):
+
+| env | default | |
+|---|---|---|
+| `LLM_PROVIDER` | `local` | `local`, `anthropic` or `openai` |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | — / `claude-opus-5-5` | Claude |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` | — / `gpt-5` | ChatGPT |
+
+If the cloud model can't be reached, the app falls back to the rule-based designer, the same way it does when the
+local model is offline. See `lib/llm-providers.ts`.
+
 ### Why Qwen2.5-3B-Instruct?
 `~/models` holds `phi-2.Q4_K_M.gguf` and two byte-identical copies of `qwen2.5-3b(-q4km).gguf` (Qwen2.5-3B-**Instruct**, Q4_K_M).
 - Qwen is instruction-tuned and follows JSON schemas reliably. phi-2 is a base model.
@@ -73,10 +88,11 @@ Output is **grammar-constrained** (JSON schema → GBNF), so the model can only 
 | `scripts/build-runtime.mjs` | esbuild bundle → `runtime-dist/pm-runtime.js` (Remotion's pure modules aliased directly so React isn't bundled). |
 | `lib/designer/*` | Prompts, per-layout JSON schemas, normalization, rule-based fallback. |
 | `lib/parsers/index.ts` | PPTX (jszip + XML), PDF (pdfjs), Markdown, images. |
-| `lib/compose.ts` | Spec → standalone HTML (inlines the remocn host + only the remocn components the video uses). |
+| `lib/compose.ts` | Spec → standalone HTML (inlines the remocn host + only the remocn components the video uses, and the Onda bundle only when a slide uses an Onda card or chart). |
 | `components/remocn/`, `lib/remocn*/` | Source of the [remocn](https://remocn.dev) registry (React/Remotion components), installed via shadcn. |
 | `runtime/remocn/*`, `runtime/engines/remocn.ts` | remocn integration: `manifest.json`/`catalog.json` (generated), the React host that renders a component in a Remotion `<Player>` seeked by the master clock, and the adapter that fills props from slide content + theme. |
 | `scripts/remocn-manifest.ts`, `scripts/build-remocn.mjs` | Classify remocn components into slots (title text effects, shader backgrounds, animated-icon decor, full-frame `showcase` scenes) and bundle them into `runtime-dist/remocn/`. |
+| `runtime/onda/` | **Onda** components (installed as source with `npx ondajs add`), the add-on that draws them inside slides with Remotion's `<Thumbnail>` (`addon.tsx`), bundled separately → `runtime-dist/pm-onda.js`. `runtime/cards.ts` maps a slide's words to card and chart props. |
 | `db/migrations/001_init.sql` | `projects`, `slides` (brief, spec, revision history), `messages`, `assets`. |
 
 ### API
@@ -93,7 +109,7 @@ Output is **grammar-constrained** (JSON schema → GBNF), so the model can only 
 | POST | `/api/projects/:id/outline/approve` | start designing |
 | POST | `/api/projects/:id/slides/:i/generate` | **SSE**: design or redesign slide `{feedback?}` |
 | POST | `/api/projects/:id/slides/:i/approve` | approve, advance / complete |
-| PATCH | `/api/projects/:id/slides/:i` | `{animations:{slot:id}, layout?, duration?}` manual edits |
+| PATCH | `/api/projects/:id/slides/:i` | `{animations:{slot:id}, layout?, duration?, style?, text?, card?}` manual edits (`card`: an Onda card id, or `null` to remove it) |
 | GET | `/api/projects/:id/preview?scope=slide&index=` / `scope=all` | player HTML |
 | GET | `/api/projects/:id/export[?draft=1]` | download standalone `.html` |
 
@@ -114,5 +130,25 @@ npm run test:remocn    # headless Chrome: every remocn component mounts on its d
 npm run typecheck && npm run lint && npm run build
 ```
 
+### Onda cards
+
+The Library's **Cards** section holds four [Onda](https://github.com/degueba/onda) components: Bento Grid, Pricing Card,
+Skeleton Card and Spotlight Card. Add one to a slide from the Library; it's filled with the slide's own words (edit them
+by clicking the card) and follows the slide's theme colours and fonts.
+
+The **Charts** section also has Onda's data charts: Bar Chart, Line Chart, Pie Reveal and Progress Bars. Applied to a
+slide with numbers, they draw those numbers (with values and labels added around Onda's drawing); a stats slide becomes
+a chart slide. The AI designer doesn't pick Onda components itself; add them from the Library or ask for one by name
+in the chat.
+
+To add another Onda component:
+
+```bash
+npx ondajs@0.9.2 add <slug> --components-out runtime/onda/components --lib-out runtime/onda/lib
+```
+
+then register it in `runtime/cards.ts` (id, where it sits, which slide words fill it), `runtime/onda/addon.tsx` and
+`runtime/registry.ts`, and run `npm run build:runtime`.
+
 ### Licensing note
-Remotion is source-available under the [Remotion License](https://remotion.dev/license). It's free for individuals and companies with up to 3 employees; larger companies need a company license. GSAP (including the bonus plugins), anime.js and Motion are free to use.
+Remotion is source-available under the [Remotion License](https://remotion.dev/license). It's free for individuals and companies with up to 3 employees; larger companies need a company license. GSAP (including the bonus plugins), anime.js and Motion are free to use. Onda's code is MIT (© Rodrigo Botelho); the Onda name and logo are not covered by that license.

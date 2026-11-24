@@ -36,6 +36,14 @@ export const FRAMEWORKS: FrameworkInfo[] = [
   { id: "motion", name: "Motion (Framer)", version: "14", color: "#f5d90a", description: "Framer Motion's vanilla engine: animate(), stagger(), spring physics, hardware-accelerated WAAPI keyframes and value generators." },
   { id: "gsap", name: "GSAP", version: "3.15", color: "#0ae448", description: "GreenSock timelines plus plugins: SplitText, ScrambleText, TextPlugin, DrawSVG, MorphSVG, MotionPath, CustomEase." },
   { id: "remocn", name: "remocn", version: "registry", color: "#ec4899", description: "remocn.dev registry of React/Remotion components (text effects, shader backgrounds, animated icons and full-frame UI scenes), rendered through the Remotion <Player>." },
+  {
+    id: "onda",
+    name: "Onda",
+    version: "0.9.2",
+    color: "#d96b82",
+    description:
+      "Premium motion-graphics components for Remotion (MIT, by Rodrigo Botelho), installed as source with `npx ondajs add` into runtime/onda/. Real React components drawn frame by frame with Remotion's <Thumbnail>; colours and fonts follow the slide theme.",
+  },
 ];
 
 export interface Primitive {
@@ -90,6 +98,13 @@ export const PRIMITIVES: Primitive[] = [
   { framework: "gsap", name: "MotionPathPlugin", kind: "plugin", description: "Animate along a path with auto-rotate." },
   { framework: "gsap", name: "CustomEase", kind: "plugin", description: "Bespoke easing curves." },
   { framework: "gsap", name: "Eases (back, elastic, expo, power, bounce)", kind: "util", description: "Built-in easing library." },
+  // Onda (runtime/onda/lib)
+  { framework: "onda", name: "<Surface>", kind: "component", description: "The glass card material every Onda card sits on: blur, hairline border, sheen and shadow." },
+  { framework: "onda", name: "<Glow>", kind: "component", description: "Soft radial accent glow behind a card (spotlight, recommended plan)." },
+  { framework: "onda", name: "useEntrance() / useStaggeredEntrance()", kind: "function", description: "The house 'rise' entrance on Onda's overdamped spring, optionally staggered across siblings." },
+  { framework: "onda", name: "SPRING_SMOOTH / STAGGER / DURATION", kind: "util", description: "Onda's motion language: one calm spring, 4-frame stagger, a shared duration scale." },
+  { framework: "onda", name: "<PlacementBox> / resolveSize()", kind: "component", description: "Canvas-aware placement regions and type sizes." },
+  { framework: "onda", name: "<Thumbnail> (@remotion/player)", kind: "component", description: "Renders an Onda composition at the slide's current frame inside the player." },
 ];
 
 const C = (
@@ -189,6 +204,18 @@ export const COMPONENTS: ComponentMeta[] = [
   C("gsap.transition.zoom-through", "transition", "Zoom Through", "Zooms into the old scene and out of the new one.", ["gsap.timeline()", "expo.inOut"], ["energetic", "bold"]),
   C("gsap.transition.curtain", "transition", "Curtain", "Accent curtain sweeps across.", ["gsap.timeline()", "power4.inOut"], ["bold", "elegant"]),
   C("gsap.transition.skew-slide", "transition", "Skew Slide", "Skewed horizontal slide.", ["gsap.timeline()", "power3.inOut"], ["energetic", "techy"]),
+
+  // ───────────── Onda data charts (React + Remotion; runtime/onda): drawn from a chart slide's numbers ─────────────
+  C("onda.chart.bar-chart", "chart", "Onda Bar Chart", "Horizontal bars grow one after another on Onda's calm spring; the biggest bar gets the accent, each value sits at its end.", ["spring()", "interpolate()", "STAGGER"], ["calm", "elegant"]),
+  C("onda.chart.line-chart", "chart", "Line Chart", "A line draws itself left to right over a soft area fill; dots, values and labels appear as it reaches each point. Best for trends over time.", ["useSceneProgress()", "SVG path", "HOUSE_EASE"], ["calm", "elegant", "techy"]),
+  C("onda.chart.pie-reveal", "chart", "Pie Reveal", "One ring per number fills to its percentage with the value in the centre and the label below. Best for percentages.", ["spring()", "SVG arc"], ["elegant", "bold"]),
+  C("onda.chart.progress-bar", "chart", "Progress Bars", "Pill-shaped bars fill to each value, labelled, one per number. Best for percentages and goals.", ["spring()", "interpolate()"], ["calm", "techy"]),
+
+  // ───────────── Onda cards (React + Remotion; runtime/onda) ─────────────
+  C("onda.card.bento-grid", "card", "Bento Grid", "Glass cells of different widths rise in one after another; the slide's cards, numbers or bullets fill them.", ["<Surface>", "useStaggeredEntrance()", "spring()"], ["elegant", "techy", "calm"]),
+  C("onda.card.pricing-card", "card", "Pricing Card", "A plan with name, big price, feature checklist and button, lifted with an accent glow. Two or three numbers on the slide become side-by-side plans.", ["<Surface>", "<Glow>", "useEntrance()"], ["bold", "elegant"]),
+  C("onda.card.skeleton-card", "card", "Skeleton Card", "A loading placeholder with a shimmer sweeping over text bars, shown beside the slide's content.", ["<Surface>", "interpolate()", "useEntrance()"], ["techy", "calm"]),
+  C("onda.card.spotlight-card", "card", "Spotlight Card", "One large glass card with a slowly drifting spotlight that holds the slide's title and message.", ["<Surface>", "<Glow>", "useCurrentFrame()"], ["elegant", "calm"]),
 ];
 
 /**

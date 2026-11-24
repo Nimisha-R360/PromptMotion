@@ -3,7 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { api, streamProject } from "@/lib/client/api";
-import type { Project } from "@/lib/types";
+import type { Project, SlideTextPatch } from "@/lib/types";
+import type { StartOptions } from "@/lib/start-options";
 
 export interface BusyState {
   kind: "outline" | "slide" | "upload" | "create" | "agent";
@@ -129,10 +130,10 @@ export function useStudio() {
   );
 
   const start = useCallback(
-    async (prompt: string) => {
+    async (prompt: string, options?: StartOptions) => {
       setBusy({ kind: "create", status: "Creating project…", tokens: 0, startedAt: Date.now() });
       try {
-        const p = await api.create(prompt);
+        const p = await api.create(prompt, options);
         setProject(p);
         router.replace(`/?p=${p.id}`);
         setBusy(null);
@@ -238,7 +239,8 @@ export function useStudio() {
   );
 
   const applyComponent = useCallback(
-    async (slot: string, componentId: string) => {
+    /** `layout`: also switch the slide's layout (a chart on a slide with numbers makes it a chart slide) */
+    async (slot: string, componentId: string, layout?: string) => {
       if (!project) return;
       const slide = project.slides[previewIndex];
       if (!slide?.spec) {
@@ -246,10 +248,28 @@ export function useStudio() {
         return;
       }
       try {
-        const p = await api.patchSlide(project.id, previewIndex, { animations: { [slot]: componentId } });
+        const p = await api.patchSlide(project.id, previewIndex, { animations: { [slot]: componentId }, ...(layout ? { layout } : {}) });
         setProject(p);
         setScope("slide");
-        toast.success(`Applied to slide ${previewIndex + 1} · ${slot}`);
+        toast.success(`Applied to slide ${previewIndex + 1} · ${slot}${layout === "chart" ? " (now a chart slide)" : ""}`);
+      } catch (e) {
+        toast.error((e as Error).message);
+      }
+    },
+    [project, previewIndex],
+  );
+
+  /** Library → Cards: draw an Onda card on the current slide (null removes it). No model call. */
+  const applyCard = useCallback(
+    async (card: string | null, name?: string) => {
+      if (!project?.slides[previewIndex]?.spec) {
+        toast.error("Design this slide first, then add a card to it.");
+        return;
+      }
+      try {
+        setProject(await api.patchSlide(project.id, previewIndex, { card }));
+        setScope("slide");
+        toast.success(card ? `Added the ${name ?? "card"} to slide ${previewIndex + 1}` : `Removed the card from slide ${previewIndex + 1}`);
       } catch (e) {
         toast.error((e as Error).message);
       }
@@ -268,6 +288,22 @@ export function useStudio() {
       }
     },
     [project, previewIndex],
+  );
+
+  /** Click-to-edit: save the words typed in the text editor (no model call). Returns true when saved. */
+  const editSlideText = useCallback(
+    async (index: number, text: SlideTextPatch) => {
+      if (!project?.slides[index]?.spec) return false;
+      try {
+        setProject(await api.patchSlide(project.id, index, { text }));
+        toast.success(`Slide ${index + 1} text saved`);
+        return true;
+      } catch (e) {
+        toast.error((e as Error).message);
+        return false;
+      }
+    },
+    [project],
   );
 
   const setTheme = useCallback(
@@ -304,7 +340,9 @@ export function useStudio() {
     redesign,
     send,
     applyComponent,
+    applyCard,
     setSlideStyle,
+    editSlideText,
     setTheme,
     cancel,
   };

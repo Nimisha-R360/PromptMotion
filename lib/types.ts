@@ -1,4 +1,5 @@
 import type { Item, Layout, SlideSpec, Stat } from "@/runtime/types";
+import type { StartOptions } from "@/lib/start-options";
 
 export type ProjectMode = "prompt" | "upload";
 export type ProjectStage = "outline" | "outline_review" | "designing" | "complete";
@@ -22,6 +23,16 @@ export interface SlideBrief {
   images?: string[];
   /** true when content is fixed (uploaded slides): the designer must not rewrite it */
   locked?: boolean;
+}
+
+/** Text edits typed by the user (click-to-edit). Each field present replaces the slide's text exactly. */
+export interface SlideTextPatch {
+  title?: string;
+  subtitle?: string;
+  body?: string;
+  bullets?: string[];
+  items?: Item[];
+  stats?: Stat[];
 }
 
 export interface Slide {
@@ -74,6 +85,8 @@ export interface Project {
   stage: ProjectStage;
   currentIndex: number;
   sourceName: string | null;
+  /** start-screen options: template, audience, slide count, mood, language */
+  options: StartOptions;
   createdAt: string;
   updatedAt: string;
   slides: Slide[];

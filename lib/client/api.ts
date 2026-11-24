@@ -1,5 +1,6 @@
 "use client";
-import type { Project, ProjectSummary } from "@/lib/types";
+import type { Project, ProjectSummary, SlideTextPatch } from "@/lib/types";
+import type { StartOptions } from "@/lib/start-options";
 import type { ComponentMeta, FrameworkInfo, Primitive } from "@/runtime/registry";
 import type { Theme } from "@/runtime/themes";
 
@@ -70,7 +71,7 @@ export const api = {
     fetch("/api/llm/settings", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then(json<LlmSettings>),
   projects: () => fetch("/api/projects", { cache: "no-store" }).then(json<{ data: ProjectSummary[] }>),
   project: (id: string) => fetch(`/api/projects/${id}`, { cache: "no-store" }).then(json<Project>),
-  create: (prompt: string) => post("/api/projects", { prompt }).then(json<Project>),
+  create: (prompt: string, options?: StartOptions) => post("/api/projects", { prompt, options }).then(json<Project>),
   upload: (files: File[], instructions?: string) => {
     const fd = new FormData();
     files.forEach((f) => fd.append("files", f));
@@ -88,7 +89,7 @@ export const api = {
   remove: (id: string) => fetch(`/api/projects/${id}`, { method: "DELETE" }).then(json<void>),
   approveOutline: (id: string) => post(`/api/projects/${id}/outline/approve`).then(json<Project>),
   approveSlide: (id: string, index: number) => post(`/api/projects/${id}/slides/${index}/approve`).then(json<Project>),
-  patchSlide: (id: string, index: number, body: { animations?: Record<string, string>; layout?: string; duration?: number; style?: string }) =>
+  patchSlide: (id: string, index: number, body: { text?: SlideTextPatch; animations?: Record<string, string>; layout?: string; duration?: number; style?: string; card?: string | null }) =>
     fetch(`/api/projects/${id}/slides/${index}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then(json<Project>),
 };
 

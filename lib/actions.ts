@@ -4,6 +4,7 @@ import { generateOutline, generateSlide, themeFromFeedback } from "@/lib/designe
 import { DESIGNER_SYSTEM, slotsFor } from "@/lib/designer/schema";
 import { isWarm, type LlmPhase } from "@/lib/llm";
 import { getComponent } from "@/runtime/registry";
+import { isChartId } from "@/runtime/cards";
 import { getTheme } from "@/runtime/themes";
 import { SLOT_CATEGORY, STYLES, type SlideSpec, type Slot } from "@/runtime/types";
 import type { Project, SlideBrief } from "@/lib/types";
@@ -84,6 +85,12 @@ export async function designSlide(projectId: string, index: number, feedback: st
     r.status("validating", `Checking and composing ${of}…`);
   });
   if (res.brief) updateSlideBrief(projectId, index, res.brief);
+  // an Onda card the user added stays when the AI redesigns the slide
+  const prevCard = project.slides[index].spec?.card;
+  if (prevCard && !res.spec.card) res.spec.card = prevCard;
+  // … and so does an Onda chart, while the slide is still a chart
+  const prevChart = project.slides[index].spec?.animations.chart;
+  if (isChartId(prevChart) && res.spec.layout === "chart") res.spec.animations = { ...res.spec.animations, chart: prevChart };
   saveSlideSpec(projectId, index, res.spec, feedback);
   if (project.stage === "complete") updateProject(projectId, { stage: "designing" });
   updateProject(projectId, { currentIndex: index });
@@ -157,14 +164,24 @@ export function applyComponent(projectId: string, index: number, componentId: st
   const { spec } = designed(projectId, index);
   const meta = getComponent(componentId);
   if (!meta) throw new ActionError(`Unknown component ${componentId}.`);
+  if (meta.category === "card") {
+    // Onda cards are content blocks, not an animation slot
+    patchSlideSpec(projectId, index, { ...spec, card: componentId });
+    setSlideStatus(projectId, index, "review");
+    updateProject(projectId, { currentIndex: index });
+    reviewCard(projectId, index, `Added the Onda ${meta.name} to slide ${index + 1}.`);
+    return { slide: index + 1, slot: "card", component: componentId };
+  }
   const slot = (Object.keys(SLOT_CATEGORY) as Slot[]).find((s) => SLOT_CATEGORY[s] === meta.category)!;
+  // a chart needs a chart slide: a slide with numbers becomes one
+  const toChart = slot === "chart" && spec.layout !== "chart" && !!spec.stats?.length;
   r.status("applying", `Applying ${meta.name} (${meta.framework}) to slide ${index + 1}…`);
-  // a remocn scene is the whole slide: it needs the showcase layout
-  const layout = slot === "scene" ? "showcase" : spec.layout;
+  // a remocn scene is the whole slide: it needs the showcase layout; a chart on a slide with numbers makes it a chart slide
+  const layout = slot === "scene" ? "showcase" : toChart ? "chart" : spec.layout;
   patchSlideSpec(projectId, index, { ...spec, layout, animations: { ...spec.animations, [slot]: componentId } });
   setSlideStatus(projectId, index, "review");
   updateProject(projectId, { currentIndex: index });
-  reviewCard(projectId, index, `Applied ${meta.name} to the ${slot} of slide ${index + 1}.`);
+  reviewCard(projectId, index, `Applied ${meta.name} to the ${slot} of slide ${index + 1}${toChart ? " (it is now a chart slide)" : ""}.`);
   return { slide: index + 1, slot, component: componentId };
 }
 
