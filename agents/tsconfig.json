@@ -1,0 +1,15 @@
+{
+  "extends": "../backend/tsconfig.json",
+  "compilerOptions": {
+    "plugins": []
+  },
+  "include": [
+    "**/*.ts",
+    "../backend/next-env.d.ts",
+    "../backend/runtime/magicui/host.tsx", "../backend/runtime/magicui/css.d.ts",
+    "../backend/runtime/lottie/host.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}
