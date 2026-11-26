@@ -1,5 +1,6 @@
 import type { Project, ProjectSummary, SlideTextPatch } from "@backend/lib/types";
 import type { StartOptions } from "@backend/lib/start-options";
+import type { VoiceSettings } from "@backend/lib/voice/voices";
 import type { ComponentMeta, FrameworkInfo, Primitive } from "@backend/runtime/registry";
 import type { Theme } from "@backend/runtime/themes";
 
@@ -31,6 +32,8 @@ export type LlmPhase =
   | "splitting"
   | "answering"
   | "validating"
+  | "narrating"
+  | "recording"
   | "waiting";
 export interface LlmStatus {
   online: boolean;
@@ -89,7 +92,7 @@ export const api = {
     files.forEach((f) => fd.append("files", f));
     return fetch(`/api/projects/${id}/media`, { method: "POST", body: fd }).then(json<{ refs: string[]; project: Project }>);
   },
-  patch: (id: string, body: { title?: string; theme?: string; mood?: string }) =>
+  patch: (id: string, body: { title?: string; theme?: string; mood?: string; voiceover?: Partial<VoiceSettings> }) =>
     fetch(`/api/projects/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then(json<Project>),
   remove: (id: string) => fetch(`/api/projects/${id}`, { method: "DELETE" }).then(json<void>),
   approveOutline: (id: string) => post(`/api/projects/${id}/outline/approve`).then(json<Project>),

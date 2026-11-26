@@ -4,7 +4,11 @@ import { generateOutline, generateSlide, themeFromFeedback } from "@agents/desig
 import { DESIGNER_SYSTEM, slotsFor } from "@agents/designer/schema";
 import { isWarm, type LlmPhase } from "@agents/llm";
 import { getComponent } from "@backend/runtime/registry";
-import { isChartId } from "@backend/runtime/cards";
+import { isChartId, isCounterId, isTextRevealId } from "@backend/runtime/cards";
+import { deleteAsset, saveAsset } from "@backend/lib/assets";
+import { speak } from "@backend/lib/voice/tts";
+import { voiceoverLanguageOk } from "@backend/lib/voice/voices";
+import { writeNarration } from "@agents/narration";
 import { getTheme } from "@backend/runtime/themes";
 import { SLOT_CATEGORY, STYLES, type SlideSpec, type Slot } from "@backend/runtime/types";
 import type { Project, SlideBrief } from "@backend/lib/types";
@@ -19,6 +23,9 @@ export interface Reporter {
   progress?: (tokens: number) => void;
 }
 export class ActionError extends Error {}
+
+/** feedback about the slide's motion ("change the title animation", "a different effect") */
+const ASKS_FOR_MOTION = /\b(animat\w*|effects?|motion|decod\w*|count(?:er|ing|s)?|scrambl\w*|reveal\w*)\b/i;
 
 const COLD = " (first run: the model is loading its design guide, ~40s extra)";
 const need = (id: string): Project => {
@@ -91,11 +98,75 @@ export async function designSlide(projectId: string, index: number, feedback: st
   // … and so does an Onda chart, while the slide is still a chart
   const prevChart = project.slides[index].spec?.animations.chart;
   if (isChartId(prevChart) && res.spec.layout === "chart") res.spec.animations = { ...res.spec.animations, chart: prevChart };
+  // … and an Onda title effect or counter, unless the feedback asks for different motion
+  const prev = project.slides[index].spec?.animations;
+  if (prev && !(feedback && ASKS_FOR_MOTION.test(feedback))) {
+    if (isTextRevealId(prev.title)) res.spec.animations = { ...res.spec.animations, title: prev.title };
+    if (isCounterId(prev.number) && slotsFor(res.spec.layout).includes("number")) res.spec.animations = { ...res.spec.animations, number: prev.number };
+  }
+  // the voiceover script the user typed stays; an AI-written one is rewritten for the new design (below)
+  const prevSpec = project.slides[index].spec;
+  if (prevSpec?.narrationEdited && prevSpec.narration) {
+    res.spec.narration = prevSpec.narration;
+    res.spec.narrationEdited = true;
+  }
   saveSlideSpec(projectId, index, res.spec, feedback);
+  // the old recording belongs to the old design
+  deleteAsset(projectId, prevSpec?.voice?.src);
+  // voiceover on: write and record this slide's voiceover too (a failure leaves the slide designed, just silent)
+  if (project.voiceover.on && voiceoverLanguageOk(project.options.language)) {
+    try {
+      await voiceSlide(projectId, index, r);
+    } catch (e) {
+      addMessage(projectId, "assistant", "error", `Slide ${index + 1} is designed, but its voiceover couldn't be recorded: ${(e as Error).message}`, { index });
+    }
+  }
   if (project.stage === "complete") updateProject(projectId, { stage: "designing" });
   updateProject(projectId, { currentIndex: index });
   reviewCard(projectId, index, res.spec.note || `Slide ${index + 1} is ready.`, { usedLlm: res.usedLlm, warning: res.warning });
   return { slide: index + 1, layout: res.spec.layout, style: res.spec.style, title: res.spec.title, usedLlm: res.usedLlm };
+}
+
+// ─────────────── voiceover ───────────────
+
+/**
+ * Slide `index`'s voiceover: write its narration (when it has none, or `rewrite`) and record it with the project's
+ * voice. A recording that already matches the narration, voice and speed is kept.
+ */
+export async function voiceSlide(projectId: string, index: number, r: Reporter, opts: { rewrite?: boolean } = {}) {
+  const project = need(projectId);
+  const slide = project.slides[index];
+  if (!slide?.spec) throw new ActionError(`Slide ${index + 1} has no design yet.`);
+  if (!voiceoverLanguageOk(project.options.language)) throw new ActionError(`The voice speaks English only, and this video is in ${project.options.language}.`);
+  const n = index + 1;
+  const { voice, speed } = project.voiceover;
+  let spec = slide.spec;
+  if (opts.rewrite || !spec.narration?.trim()) {
+    r.status("narrating", `Writing the voiceover for slide ${n}…`);
+    const { text } = await writeNarration(project, index, spec);
+    spec = { ...spec, narration: text, narrationEdited: undefined };
+    patchSlideSpec(projectId, index, spec);
+  }
+  const text = spec.narration!.trim();
+  const old = spec.voice;
+  if (old && old.text === text && old.voice === voice && old.speed === speed) return { slide: n, seconds: old.duration, upToDate: true };
+  r.status("recording", `Recording the voiceover for slide ${n}…`);
+  const speech = await speak(text, voice, speed);
+  const src = saveAsset(projectId, speech.mp3, "audio/mpeg", `voiceover-slide-${n}.mp3`);
+  // the slide may have changed while recording (e.g. its narration was edited): store on top of the latest design
+  const latest = need(projectId).slides[index].spec ?? spec;
+  patchSlideSpec(projectId, index, { ...latest, voice: { src, duration: speech.duration, text, voice, speed, captions: speech.captions } });
+  deleteAsset(projectId, old?.src);
+  return { slide: n, seconds: speech.duration, upToDate: false };
+}
+
+/** Voiceover for every designed slide (writes missing narrations, records missing or out-of-date ones). */
+export async function voiceVideo(projectId: string, r: Reporter) {
+  const todo = need(projectId).slides.filter((s) => s.spec).map((s) => s.index);
+  if (!todo.length) throw new ActionError("Design a slide first.");
+  let recorded = 0;
+  for (const i of todo) if (!(await voiceSlide(projectId, i, r)).upToDate) recorded++;
+  return { slides: todo.length, recorded };
 }
 
 /** Approve a slide; returns the next slide that still needs work (or null when the video is complete). */

@@ -104,11 +104,12 @@ Output is **grammar-constrained** (JSON schema → GBNF), so the model can only 
 | `backend/scripts/build-runtime.mjs` | esbuild bundle → `runtime-dist/pm-runtime.js` (Remotion's pure modules aliased directly so React isn't bundled). |
 | `agents/designer/*` | Prompts, per-layout JSON schemas, normalization, rule-based fallback. |
 | `backend/lib/parsers/index.ts` | PPTX (jszip + XML), PDF (pdfjs), Markdown, images. |
-| `backend/lib/compose.ts` | Spec → standalone HTML (inlines the remocn host + only the remocn components the video uses, and the Onda bundle only when a slide uses an Onda card or chart). |
+| `backend/lib/compose.ts` | Spec → standalone HTML (inlines the remocn host + only the remocn components the video uses, and the Onda bundle only when a slide uses an Onda card, chart or text reveal). |
 | `backend/components/remocn/`, `backend/lib/remocn*/` | Source of the [remocn](https://remocn.dev) registry (React/Remotion components), installed via shadcn. |
 | `backend/runtime/remocn/*`, `backend/runtime/engines/remocn.ts` | remocn integration: `manifest.json`/`catalog.json` (generated), the React host that renders a component in a Remotion `<Player>` seeked by the master clock, and the adapter that fills props from slide content + theme. |
 | `backend/scripts/remocn-manifest.ts`, `backend/scripts/build-remocn.mjs` | Classify remocn components into slots (title text effects, shader backgrounds, animated-icon decor, full-frame `showcase` scenes) and bundle them into `runtime-dist/remocn/`. |
-| `backend/runtime/onda/` | **Onda** components (installed as source with `npx ondajs add`), the add-on that draws them inside slides with Remotion's `<Thumbnail>` (`addon.tsx`), bundled separately → `runtime-dist/pm-onda.js`. `runtime/cards.ts` maps a slide's words to card and chart props. |
+| `backend/runtime/onda/` | **Onda** components (installed as source with `npx ondajs add`), the add-on that draws them inside slides with Remotion's `<Thumbnail>` (`addon.tsx`), bundled separately → `runtime-dist/pm-onda.js`. `runtime/cards.ts` maps a slide's words to card and chart props; `runtime/engines/onda.ts` lays Onda text reveals over the slide's text. |
+| `backend/lib/voice/`, `agents/narration.ts` | **Voiceover**: the voice list and settings (`voices.ts`), the local text-to-speech (`tts.ts`: Kokoro through kokoro-js, sentence by sentence, encoded to MP3) and the narration writer (`agents/narration.ts`, one small model call per slide). |
 | `db/migrations/001_init.sql` | `projects`, `slides` (brief, spec, revision history), `messages`, `assets`. |
 
 ### API
@@ -125,7 +126,8 @@ Output is **grammar-constrained** (JSON schema → GBNF), so the model can only 
 | POST | `/api/projects/:id/outline/approve` | start designing |
 | POST | `/api/projects/:id/slides/:i/generate` | **SSE**: design or redesign slide `{feedback?}` |
 | POST | `/api/projects/:id/slides/:i/approve` | approve, advance / complete |
-| PATCH | `/api/projects/:id/slides/:i` | `{animations:{slot:id}, layout?, duration?, style?, text?, card?}` manual edits (`card`: an Onda card id, or `null` to remove it) |
+| PATCH | `/api/projects/:id/slides/:i` | `{animations:{slot:id}, layout?, duration?, style?, text?, card?}` manual edits (`card`: an Onda card id, or `null` to remove it · `text.narration`: the voiceover script) |
+| POST | `/api/projects/:id/voice` | `{index?, rewrite?}` SSE: write (when missing, or `rewrite`) and record the voiceover of one slide, or every designed slide |
 | GET | `/api/projects/:id/preview?scope=slide&index=` / `scope=all` | player HTML |
 | GET | `/api/projects/:id/export[?draft=1]` | download standalone `.html` |
 
@@ -157,6 +159,12 @@ slide with numbers, they draw those numbers (with values and labels added around
 a chart slide. The AI designer doesn't pick Onda components itself; add them from the Library or ask for one by name
 in the chat.
 
+Two Onda text reveals also work on the slide's own text: **Text effects** has **Matrix Decode Title** (each letter of the
+title flickers through random glyphs, then settles left to right, line by line) and **Counters** has **Onda Count Up**
+(stat values count up on Onda's spring). Both redraw the text in the slide's font, colour, gradient or outline. Count Up
+writes numbers the en-US way, so a value written differently ("2024", "1,00,000") keeps the built-in counter and reads
+exactly as on the slide. When the AI redesigns a slide, these stay unless the feedback asks for different motion.
+
 To add another Onda component:
 
 ```bash
@@ -166,5 +174,29 @@ cd backend && npx ondajs@0.9.2 add <slug> --components-out runtime/onda/componen
 then register it in `backend/runtime/cards.ts` (id, where it sits, which slide words fill it), `runtime/onda/addon.tsx` and
 `runtime/registry.ts`, and run `npm --prefix backend run build:runtime`.
 
+### Voiceover
+
+Each slide can have a voiceover: what a presenter would say over it, spoken in sync with the slides, with captions.
+Open it with **Voiceover** in the slide toolbar under the preview.
+
+- **Turn on** (per video) and the AI writes a short narration for every designed slide (2 or 3 sentences, from the
+  slide's own words), then a voice model **on this computer** speaks it. From then on, new and redesigned slides get
+  theirs automatically. Pick one of 9 English voices (American or British), a speed, and captions on or off.
+- **Edit** the words in the same dialog; saving records it again. A narration you typed survives redesigns
+  ("Rewrite with AI" replaces it).
+- **In the player:** each slide lasts at least as long as its narration; the voice plays, pauses, scrubs and loops with
+  the video. Captions show the sentence being spoken, each word lighting up as it's said. Sound and CC buttons sit in the
+  control bar. Browsers block sound until the viewer clicks, so an exported video that starts by itself plays silently
+  with a "Click for sound" button until then.
+- **Exports** carry the audio inside the HTML (MP3 at 48 kbps: about 0.35 MB a minute). The web page format doesn't
+  speak yet.
+
+The voice is [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) (82M parameters, Apache-2.0) through
+[kokoro-js](https://www.npmjs.com/package/kokoro-js) on the CPU. Its model (~90 MB) downloads from Hugging Face on
+first use into `backend/data/models/hf`; the voices ship inside kokoro-js. It runs at roughly real time on a 4-core
+laptop (a 12-second narration takes about 12 seconds), one recording at a time. English only: videos in other
+languages can't have a voiceover. `backend/.npmrc` tells onnxruntime-node (Kokoro's engine) not to download GPU (CUDA)
+files.
+
 ### Licensing note
-Remotion is source-available under the [Remotion License](https://remotion.dev/license). It's free for individuals and companies with up to 3 employees; larger companies need a company license. GSAP (including the bonus plugins), anime.js and Motion are free to use. Onda's code is MIT (© Rodrigo Botelho); the Onda name and logo are not covered by that license.
+Remotion is source-available under the [Remotion License](https://remotion.dev/license). It's free for individuals and companies with up to 3 employees; larger companies need a company license. GSAP (including the bonus plugins), anime.js and Motion are free to use. Onda's code is MIT (© Rodrigo Botelho); the Onda name and logo are not covered by that license. The Kokoro voice model and kokoro-js are Apache-2.0; the MP3 encoder (`@breezystack/lamejs`) is LGPL-3.0, used as an unmodified library on the server.

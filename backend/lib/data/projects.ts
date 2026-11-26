@@ -5,6 +5,7 @@ import { listMedia } from "@/lib/assets";
 import type { SlideSpec } from "@/runtime/types";
 import type { Message, Mood, Project, ProjectMode, ProjectStage, ProjectSummary, Slide, SlideBrief, SlideStatus } from "@/lib/types";
 import { parseStartOptions, type StartOptions } from "@/lib/start-options";
+import { parseVoiceSettings, type VoiceSettings } from "@/lib/voice/voices";
 
 interface ProjectRow {
   id: string;
@@ -17,6 +18,7 @@ interface ProjectRow {
   current_index: number;
   source_name: string | null;
   options_json: string;
+  voice_json?: string;
   created_at: string;
   updated_at: string;
 }
@@ -110,6 +112,22 @@ function readOptions(json: string | undefined): StartOptions {
   }
 }
 
+function readVoice(json: string | undefined): VoiceSettings {
+  try {
+    return parseVoiceSettings(JSON.parse(json || "{}"));
+  } catch {
+    return parseVoiceSettings({});
+  }
+}
+
+/** Save the voiceover settings (merged with the current ones). */
+export function setVoiceover(id: string, patch: Partial<VoiceSettings>): VoiceSettings {
+  const p = stmt.getProject.get(id) as ProjectRow | undefined;
+  const next = parseVoiceSettings({ ...readVoice(p?.voice_json), ...patch });
+  db.prepare(`UPDATE projects SET voice_json = ?, updated_at = ? WHERE id = ?`).run(JSON.stringify(next), now(), id);
+  return next;
+}
+
 export function getProject(id: string): Project | null {
   const p = stmt.getProject.get(id) as ProjectRow | undefined;
   if (!p) return null;
@@ -124,6 +142,7 @@ export function getProject(id: string): Project | null {
     currentIndex: p.current_index,
     sourceName: p.source_name,
     options: readOptions(p.options_json),
+    voiceover: readVoice(p.voice_json),
     createdAt: p.created_at,
     updatedAt: p.updated_at,
     slides: (stmt.slides.all(id) as SlideRow[]).map(mapSlide),

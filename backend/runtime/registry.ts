@@ -287,6 +287,10 @@ export const COMPONENTS: ComponentMeta[] = [
   C("onda.card.spotlight", "card", "Spotlight", "A soft radial light reveal that grows from 0 to a target radius on the Onda house spring. Over the slide's title.", ["<Spotlight>"], ["elegant", "bold"]),
   C("onda.card.vignette", "card", "Vignette", "A static cinematic vignette: a radial darkening at the canvas edges that frames the center. Over the slide's title.", ["<Vignette>"], ["elegant", "bold"]),
 
+  // ───────────── Onda text reveals (React + Remotion; runtime/onda): drawn over the slide's own text ─────────────
+  C("onda.text.matrix-decode", "text", "Matrix Decode Title", "Each letter of the title flickers through random glyphs in the accent colour, then settles left to right, line by line.", ["seededRandom()", "useCurrentFrame()"], ["techy", "bold"]),
+  C("onda.number.count-up", "number", "Onda Count Up", "Each number counts up on Onda's calm spring while it fades in; digits keep a fixed width, and $, % and units stay in place.", ["spring()", "SPRING_SMOOTH", "entryFade()"], ["calm", "elegant"]),
+
   // ───────────── Magic UI cards (React + Tailwind; components/magicui, drawn by runtime/magicui) ─────────────
   C("magicui.card.android", "card", "Android", "A mockup of an Android device. Beside the slide's text, showing the slide's picture.", ["<Android>"], ["techy"]),
   C("magicui.card.animated-beam", "card", "Animated Beam", "An animated beam of light which travels along a path. Useful for showcasing the integration features of a website. Beams connect the slide's bullets to its title.", ["<AnimatedBeam>"], ["elegant", "bold"]),

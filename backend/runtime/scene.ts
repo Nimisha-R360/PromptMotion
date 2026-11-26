@@ -6,7 +6,8 @@ import { anime } from "./engines/anime";
 import { motion } from "./engines/motion";
 import { gsapEngine } from "./engines/gsap";
 import { isRemocnId, isVideoSrc, remocnAvailable, remocnBackground, remocnDecor, remocnScene, remocnText } from "./engines/remocn";
-import { cardAddon, cardField, cardMode, cardTakesLists, isCardId, isChartId, type CardMode } from "./cards";
+import { cardAddon, cardField, cardMode, cardTakesLists, isCardId, isChartId, isCounterId, isTextRevealId, type CardMode } from "./cards";
+import { ondaNumber, ondaText, ondaTextAvailable } from "./engines/onda";
 
 const ENGINES: EngineImpls[] = [remotion, anime, motion, gsapEngine];
 
@@ -22,10 +23,15 @@ export function findImpl<C extends Cat>(cat: C, id: string): EngineImpls[C][stri
     if (cat === "background") return remocnBackground(id) as EngineImpls[C][string];
     if (cat === "decor") return remocnDecor(id) as EngineImpls[C][string];
   }
+  // Onda text reveals (only when the Onda add-on was inlined into the page)
+  if (ondaTextAvailable(id)) {
+    if (cat === "text" && isTextRevealId(id)) return ondaText(id) as EngineImpls[C][string];
+    if (cat === "number" && isCounterId(id)) return ondaNumber(id, (el, n, c) => impl("number", FALLBACK.number)(el, n, c)) as EngineImpls[C][string];
+  }
   return undefined;
 }
 
-/** Every implemented id per category (used by tests + fallbacks). Onda cards count when the add-on is on the page. */
+/** Every implemented id per category (used by tests + fallbacks). Onda components count when the add-on is on the page. */
 export function implementedIds(): Record<Cat | "card", string[]> {
   const out = {} as Record<Cat | "card", string[]>;
   for (const cat of ["text", "entrance", "list", "number", "chart", "background", "decor", "transition"] as Cat[]) {
@@ -34,6 +40,8 @@ export function implementedIds(): Record<Cat | "card", string[]> {
   const onda = window.PromptMotionOnda?.ids ?? [];
   out.card = [...onda.filter((id) => id.startsWith("onda.card.")), ...(window.PromptMotionMagicUI?.ids ?? []), ...(window.PromptMotionLottie?.ids ?? [])];
   out.chart = [...out.chart, ...onda.filter((id) => id.startsWith("onda.chart."))];
+  out.text = [...out.text, ...onda.filter((id) => id.startsWith("onda.text."))];
+  out.number = [...out.number, ...onda.filter((id) => id.startsWith("onda.number."))];
   return out;
 }
 
@@ -58,10 +66,19 @@ export interface Track {
   failed?: boolean;
 }
 
+/** A slide's voiceover: the player plays `audio` from `start` seconds into the scene, in sync with its clock. */
+export interface SceneVoice {
+  audio: HTMLAudioElement;
+  start: number;
+  duration: number;
+  captions: { text: string; start: number; end: number }[];
+}
+
 export interface BuiltScene {
   el: HTMLElement;
   tracks: Track[];
   duration: number;
+  voice?: SceneVoice;
   makeTransition: (t: Omit<TransitionTargets, "inEl">, ctx: Ctx) => TransitionHandle;
   ctx: Ctx;
 }
@@ -396,14 +413,24 @@ export function buildScene(spec: SlideSpec, theme: Theme, index: number, parent:
     t(1.0, id, () => onda.mount(slot, { id, spec, theme, portrait, duration: ondaDuration }), () => () => {});
   }
 
-  // minimum duration so every element finishes animating + 2s of hold
+  // voiceover: starts once the slide has settled in (after the transition), the slide lasts until it has finished
+  let voice: SceneVoice | undefined;
+  if (spec.voice?.src && spec.voice.duration > 0) {
+    const audio = new Audio();
+    audio.preload = "auto";
+    audio.src = spec.voice.src;
+    voice = { audio, start: index === 0 ? 0.4 : 0.6, duration: spec.voice.duration, captions: spec.voice.captions ?? [] };
+  }
+
+  // minimum duration so every element finishes animating + 2s of hold (and the voiceover ends before the next slide)
   const lastStart = Math.max(...tracks.map((tr) => tr.start), 0);
-  const duration = Math.max(spec.duration || 6, lastStart + 3.2);
+  const duration = Math.max(spec.duration || 6, lastStart + 3.2, voice ? voice.start + voice.duration + 1 : 0);
 
   return {
     el,
     tracks,
     duration,
+    voice,
     ctx,
     makeTransition: (targets, c) => {
       const mk = impl("transition", A.transition);

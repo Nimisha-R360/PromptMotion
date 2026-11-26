@@ -1,8 +1,9 @@
-// Onda components on a slide: cards (whole content blocks) and charts (the chart slot of a chart slide).
-// Which ids exist, where a card sits on the slide, and which slide text fills it.
+// Onda components on a slide: cards (whole content blocks), charts (the chart slot of a chart slide) and text reveals
+// (a title effect and a number counter). Which ids exist, where a card sits on the slide, and which slide text fills it.
 // Pure TypeScript (no React), shared by the slide runtime, the Onda add-on bundle and the server.
 import type { SlideSpec } from "./types";
 import type { Theme } from "./themes";
+import { slotsFor } from "./layouts";
 import { EXTRA_CARD_IDS, extraCardField, extraCardMode, isExtraCardId } from "./cards-extra";
 import { MAGICUI_CARD_IDS, isMagicCardId, magicCardField, magicCardMode } from "./magicui-cards";
 import { LOTTIE_CARD_IDS, isLottieCardId, lottieCardField, lottieCardMode } from "./lottie-cards";
@@ -17,12 +18,26 @@ export const CHART_IDS = ["onda.chart.bar-chart", "onda.chart.line-chart", "onda
 export type ChartId = (typeof CHART_IDS)[number];
 export const isChartId = (v: unknown): v is ChartId => typeof v === "string" && (CHART_IDS as readonly string[]).includes(v);
 
+/** Onda's text reveals: Matrix Decode as a title effect, Count Up as a number counter (stat values). */
+export const TEXT_REVEAL_IDS = ["onda.text.matrix-decode"] as const;
+export const COUNTER_IDS = ["onda.number.count-up"] as const;
+export type TextRevealId = (typeof TEXT_REVEAL_IDS)[number];
+export type CounterId = (typeof COUNTER_IDS)[number];
+export const isTextRevealId = (v: unknown): v is TextRevealId => typeof v === "string" && (TEXT_REVEAL_IDS as readonly string[]).includes(v);
+export const isCounterId = (v: unknown): v is CounterId => typeof v === "string" && (COUNTER_IDS as readonly string[]).includes(v);
+/** an Onda text reveal (drawn over the slide's own text) */
+export type OndaTextId = TextRevealId | CounterId;
+
+/** Onda cards and charts: drawn as a block of the slide (sized and zoomed to their slot). */
 export type OndaId = CardId | ChartId;
-export const ONDA_IDS: readonly OndaId[] = [...CARD_IDS.filter((id) => !isMagicCardId(id) && !isLottieCardId(id)), ...CHART_IDS];
+export const ONDA_IDS: readonly (OndaId | OndaTextId)[] = [...CARD_IDS.filter((id) => !isMagicCardId(id) && !isLottieCardId(id)), ...CHART_IDS, ...TEXT_REVEAL_IDS, ...COUNTER_IDS];
 
 /** Does this slide draw an Onda component (so its page needs the Onda add-on)? */
 export const usesOnda = (s: Pick<SlideSpec, "card" | "layout" | "animations">): boolean =>
-  (isCardId(s.card) && !isMagicCardId(s.card) && !isLottieCardId(s.card)) || (s.layout === "chart" && isChartId(s.animations?.chart));
+  (isCardId(s.card) && !isMagicCardId(s.card) && !isLottieCardId(s.card)) ||
+  (s.layout === "chart" && isChartId(s.animations?.chart)) ||
+  isTextRevealId(s.animations?.title) ||
+  (slotsFor(s.layout).includes("number") && isCounterId(s.animations?.number));
 
 /** Does this slide draw a Magic UI card (so its page needs the Magic UI add-on)? */
 export const usesMagicUI = (s: Pick<SlideSpec, "card">): boolean => isMagicCardId(s.card);
@@ -44,12 +59,56 @@ export interface OndaMountOptions {
   duration: number;
 }
 
+/** How the slide styles the text an Onda text reveal redraws (read from the element, so the effect looks like the slide). */
+export interface OndaTextStyle {
+  fontSize: number;
+  fontFamily: string;
+  fontWeight: number;
+  letterSpacing: string;
+  /** px */
+  lineHeight: number;
+  /** "transparent" when the text is painted by a gradient or an outline */
+  color: string;
+  align: "left" | "center" | "right";
+  textTransform: string;
+  fontStyle: string;
+  /** gradient text (background-clip: text) */
+  backgroundImage?: string;
+}
+
+export interface OndaTextOptions {
+  id: OndaTextId;
+  /** matrix decode: the text as the slide lays it out, one entry per line */
+  lines: string[];
+  /** count up: the number as written on the slide ("$3.2M" → "$", 3.2, 1 decimal, "M") */
+  number?: { prefix: string; value: number; decimals: number; suffix: string };
+  style: OndaTextStyle;
+  /** size of the text, and the room around it (scrambled glyphs can be wider than the final letters) */
+  width: number;
+  height: number;
+  padX: number;
+  padY: number;
+  theme: Theme;
+  /** scene length in seconds */
+  duration: number;
+  seed: number;
+}
+
+export interface OndaTextMount {
+  /** show the frame at t seconds (slide clock) */
+  seek(t: number): void;
+  /** the text was laid out again (e.g. its web font finished loading): redraw at the new size */
+  update(o: OndaTextOptions): void;
+}
+
 /** The Onda add-on bundle (runtime/onda/addon.tsx) registers itself as window.PromptMotionOnda. */
 export interface OndaAddon {
   version: string;
   ids: readonly string[];
   /** draws a card or chart into `host` (sized by the slide's CSS); returns seek(t) driven by the slide's clock */
   mount(host: HTMLElement, o: OndaMountOptions): (t: number) => void;
+  /** Onda only: draws a text reveal into `box` (laid over the slide's own text) */
+  mountText?(box: HTMLElement, o: OndaTextOptions): OndaTextMount;
 }
 
 declare global {

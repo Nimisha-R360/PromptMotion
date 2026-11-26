@@ -19,6 +19,8 @@ const Text = z.object({
   bullets: z.array(line(200)).max(6).optional(),
   items: z.array(z.object({ heading: line(80), text: line(240) })).max(5).optional(),
   stats: z.array(z.object({ value: line(24), label: line(80) })).max(6).optional(),
+  /** the voiceover script (empty = let the AI write it again next time) */
+  narration: line(700).optional(),
 });
 
 const Body = z.object({
@@ -70,6 +72,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (text.items !== undefined) {
       const list = text.items.filter((it) => it.heading || it.text);
       set("items", list.length ? list : undefined);
+    }
+    if (text.narration !== undefined) {
+      // the voiceover script lives on the design only; a redesign keeps one the user typed (agents/actions.ts)
+      spec = { ...spec, narration: text.narration || undefined, narrationEdited: text.narration ? true : undefined };
     }
     if (text.stats !== undefined) {
       const list = text.stats.filter((st) => st.value || st.label);

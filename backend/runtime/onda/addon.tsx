@@ -4,7 +4,7 @@
 // slide's current frame, so scrubbing and exports stay frame-exact.
 import React from "react";
 import { flushSync } from "react-dom";
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
 import { Thumbnail } from "@remotion/player";
 import { BentoGrid, bentoGridSchema } from "./components/bento-grid/BentoGrid";
@@ -119,7 +119,7 @@ import { WordRotate } from "./components/word-rotate/WordRotate";
 import { wordRotateSchema } from "./components/word-rotate/schema";
 import { WordStagger } from "./components/word-stagger/WordStagger";
 import { wordStaggerSchema } from "./components/word-stagger/schema";
-import { ONDA_IDS, cardProps, isCardId, type CardId, type ChartId, type OndaId, type OndaMountOptions } from "../cards";
+import { ONDA_IDS, cardProps, isCardId, type CardId, type ChartId, type OndaId, type OndaMountOptions, type OndaTextMount, type OndaTextOptions } from "../cards";
 import { parseNumber } from "../dom";
 import type { SlideSpec } from "../types";
 import { extraCardLayout, extraCardParts, isExtraCardId, type CardLayout, type CardPart, type ExtraCardId } from "../cards-extra";
@@ -561,4 +561,100 @@ function mount(host: HTMLElement, o: OndaMountOptions): (t: number) => void {
   };
 }
 
-window.PromptMotionOnda = { version: "0.9.2", ids: ONDA_IDS, mount };
+// ───────────── text reveals: Onda MatrixDecode (title effect) and CountUp (number counter), drawn over the slide's own text ─────────────
+// (runtime/engines/onda.ts hides the slide's text and measures it; the slide's font, colour, gradient and outline are kept.)
+
+/** Draw a w×h composition at `frame` into `root`, synchronously (a seek shows at once, and can be measured). */
+function drawFrame<P extends Record<string, unknown>>(root: Root, component: React.FC<P>, inputProps: P, w: number, h: number, durationInFrames: number, frame: number) {
+  flushSync(() =>
+    root.render(
+      <Thumbnail
+        component={component as React.FC<Record<string, unknown>>}
+        inputProps={inputProps}
+        compositionWidth={w}
+        compositionHeight={h}
+        durationInFrames={durationInFrames}
+        fps={FPS}
+        frameToDisplay={frame}
+        style={{ width: w, height: h }}
+      />,
+    ),
+  );
+}
+
+const JUSTIFY = { left: "flex-start", center: "center", right: "flex-end" } as const;
+
+interface TextSceneProps extends Record<string, unknown> {
+  o: Omit<OndaTextOptions, "theme">;
+  vars: React.CSSProperties;
+}
+
+const TextScene: React.FC<TextSceneProps> = ({ o, vars }) => {
+  const s = o.style;
+  const font = { fontSize: s.fontSize, fontFamily: s.fontFamily, fontWeight: s.fontWeight, letterSpacing: s.letterSpacing, color: s.color, align: s.align };
+  let body: React.ReactNode;
+  if (o.id === "onda.number.count-up" && o.number) {
+    const n = o.number;
+    const props = countUpSchema.parse({ ...font, from: 0, to: n.value, decimals: n.decimals, prefix: n.prefix, suffix: n.suffix, lineHeight: s.lineHeight / s.fontSize });
+    body = <CountUp {...props} />;
+  } else {
+    // MatrixDecode keeps its text on one line: one per laid-out line, decoding on from where the last one ended.
+    // Long titles settle faster (1-3 frames per letter) so the whole headline lands in about 1.5 s.
+    const charDelay = Math.min(3, Math.max(1, Math.round(30 / Math.max(1, o.lines.join(" ").length))));
+    let at = 0;
+    body = o.lines.map((line, k) => {
+      const props = matrixDecodeSchema.parse({ ...font, text: line, delay: at * charDelay, charDelay, seed: o.seed + k * 101 });
+      at += line.length + 1;
+      // a flex row lets a line still scrambling (wider glyphs) overflow evenly around a centred title, not off one side
+      return (
+        <div key={k} style={{ height: s.lineHeight, display: "flex", justifyContent: JUSTIFY[s.align] }}>
+          <MatrixDecode {...props} />
+        </div>
+      );
+    });
+  }
+  // gradient text: every layer of the Onda text repaints the slide's gradient (the slide's own CSS does the same)
+  const paint = s.backgroundImage ? { backgroundImage: s.backgroundImage, WebkitBackgroundClip: "text", backgroundClip: "text" } : undefined;
+  return (
+    <AbsoluteFill style={vars}>
+      <div
+        className={paint ? "pm-onda-paint" : undefined}
+        style={{ position: "absolute", left: o.padX, top: o.padY, width: o.width, lineHeight: `${s.lineHeight}px`, textTransform: s.textTransform as React.CSSProperties["textTransform"], fontStyle: s.fontStyle, ...paint }}
+      >
+        {body}
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+/** Mount a text reveal into `box` (laid over the slide's text by runtime/engines/onda.ts). */
+function mountText(box: HTMLElement, first: OndaTextOptions): OndaTextMount {
+  const durationInFrames = Math.max(1, Math.ceil((first.duration + 2) * FPS));
+  const root = createRoot(box);
+  let w = 0;
+  let h = 0;
+  let props: TextSceneProps;
+  const set = (o: OndaTextOptions) => {
+    w = o.width + o.padX * 2;
+    h = o.height + o.padY * 2;
+    const { theme, ...rest } = o;
+    props = { o: rest, vars: themeVars(theme) };
+  };
+  set(first);
+  let last = -1;
+  const draw = (frame: number) => drawFrame(root, TextScene, props, w, h, durationInFrames, frame);
+  return {
+    seek(t) {
+      const frame = Math.min(durationInFrames - 1, Math.max(0, Math.round(t * FPS)));
+      if (frame === last) return;
+      draw(frame);
+      last = frame;
+    },
+    update(o) {
+      set(o);
+      if (last >= 0) draw(last);
+    },
+  };
+}
+
+window.PromptMotionOnda = { version: "0.9.2", ids: ONDA_IDS, mount, mountText };

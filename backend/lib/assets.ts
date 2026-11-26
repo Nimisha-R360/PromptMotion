@@ -23,6 +23,8 @@ export const VIDEO_MIME: Record<string, string> = {
   webm: "video/webm",
   mov: "video/quicktime",
 };
+/** voiceover audio made by the local voice model (lib/voice/tts.ts) */
+export const AUDIO_MIME: Record<string, string> = { mp3: "audio/mpeg" };
 /** mime of an attachable media file (image or video clip) from its name, or undefined */
 export const mediaMime = (fileName: string) => {
   const ext = path.extname(fileName).slice(1).toLowerCase();
@@ -30,7 +32,7 @@ export const mediaMime = (fileName: string) => {
 };
 
 export function saveAsset(projectId: string, data: Buffer, mime: string, name = ""): string {
-  const ext = Object.entries({ ...IMAGE_MIME, ...VIDEO_MIME }).find(([, m]) => m === mime)?.[0] ?? "bin";
+  const ext = Object.entries({ ...IMAGE_MIME, ...VIDEO_MIME, ...AUDIO_MIME }).find(([, m]) => m === mime)?.[0] ?? "bin";
   const id = nanoid(10);
   const dir = path.join(UPLOAD_DIR, projectId);
   fs.mkdirSync(dir, { recursive: true });
@@ -67,15 +69,29 @@ function assetDataUri(ref: string, projectId: string): string | undefined {
   return uri;
 }
 
-/** Inline uploaded images so the exported HTML is fully standalone. */
+/** Remove one stored asset (e.g. a voiceover replaced by a new recording). */
+export function deleteAsset(projectId: string, ref: string | undefined) {
+  if (!ref?.startsWith("asset:")) return;
+  const id = ref.slice("asset:".length);
+  const row = db.prepare(`SELECT file FROM assets WHERE id = ? AND project_id = ?`).get(id, projectId) as { file: string } | undefined;
+  if (!row) return;
+  db.prepare(`DELETE FROM assets WHERE id = ? AND project_id = ?`).run(id, projectId);
+  fs.rmSync(row.file, { force: true });
+  dataUriCache.delete(id);
+}
+
+/** Inline uploaded images and voiceover audio so the exported HTML is fully standalone. */
 export function resolveAssets(spec: SlideSpec, projectId: string): SlideSpec {
   const isRef = (x?: string) => !!x?.startsWith("asset:");
-  if (!isRef(spec.image) && !spec.images?.some(isRef)) return spec;
+  if (!isRef(spec.image) && !spec.images?.some(isRef) && !isRef(spec.voice?.src)) return spec;
   const resolve = (x: string) => (isRef(x) ? assetDataUri(x, projectId) : x);
+  const voiceSrc = spec.voice && resolve(spec.voice.src);
   return {
     ...spec,
     image: spec.image ? resolve(spec.image) : undefined,
     ...(spec.images ? { images: spec.images.map(resolve).filter((x): x is string => !!x) } : {}),
+    // a recording whose file is gone is left out (the slide plays silently)
+    voice: spec.voice && voiceSrc ? { ...spec.voice, src: voiceSrc } : undefined,
   };
 }
 

@@ -19,6 +19,8 @@ export const PHASE_LABEL: Record<string, string> = {
   splitting: "Splitting slide",
   answering: "Answering",
   validating: "Validating",
+  narrating: "Writing voiceover",
+  recording: "Recording voiceover",
   waiting: "Waiting for you",
 };
 

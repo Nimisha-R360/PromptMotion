@@ -1,5 +1,6 @@
 import type { Item, Layout, SlideSpec, Stat } from "../runtime/types";
 import type { StartOptions } from "./start-options";
+import type { VoiceSettings } from "./voice/voices";
 
 export type ProjectMode = "prompt" | "upload";
 export type ProjectStage = "outline" | "outline_review" | "designing" | "complete";
@@ -33,6 +34,8 @@ export interface SlideTextPatch {
   bullets?: string[];
   items?: Item[];
   stats?: Stat[];
+  /** the voiceover script */
+  narration?: string;
 }
 
 export interface Slide {
@@ -87,6 +90,8 @@ export interface Project {
   sourceName: string | null;
   /** start-screen options: template, audience, slide count, mood, language */
   options: StartOptions;
+  /** voiceover settings */
+  voiceover: VoiceSettings;
   createdAt: string;
   updatedAt: string;
   slides: Slide[];

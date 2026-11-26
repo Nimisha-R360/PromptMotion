@@ -25,7 +25,9 @@ export function buildVideoSpec(
     return true;
   });
   if (!pick.length) return null;
-  const slides = pick.map((s) => resolveAssets(s.spec!, project.id));
+  // voiceover plays in the video player (the web page doesn't speak yet); off → the slides play silently
+  const voice = project.voiceover.on && format === "video";
+  const slides = pick.map((s) => resolveAssets(voice ? s.spec! : { ...s.spec!, voice: undefined }, project.id));
   const focus = scope === "slide" || format === "web" ? pick.findIndex((s) => s.index === index) : undefined;
   return {
     format,
@@ -35,6 +37,7 @@ export function buildVideoSpec(
     autoplay: true,
     loop: scope === "slide",
     focus: focus != null && focus >= 0 ? focus : undefined,
+    captions: voice && project.voiceover.captions,
     // studio preview: clicking a text opens the text editor for that slide
     ...(opts.editable ? { editable: true, refs: pick.map((s) => s.index) } : {}),
   };

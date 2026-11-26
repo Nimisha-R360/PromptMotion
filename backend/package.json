@@ -15,6 +15,7 @@
     "test:remocn": "node scripts/build-runtime.mjs && node scripts/build-remocn.mjs && tsx scripts/test-remocn.ts"
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "@fontsource/inter": "^5.3.0",
     "@fontsource/manrope": "^5.3.0",
     "@fontsource/roboto-mono": "^5.3.0",
@@ -40,6 +41,7 @@
     "fast-xml-parser": "^5.12.1",
     "gsap": "^3.15.1",
     "jszip": "^3.10.2",
+    "kokoro-js": "^1.2.1",
     "lottie-web": "^5.13.0",
     "lucide-react": "^1.78.0",
     "motion": "^14.14.0",

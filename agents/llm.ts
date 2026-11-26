@@ -26,6 +26,8 @@ export type LlmPhase =
   | "splitting"
   | "answering"
   | "validating"
+  | "narrating" // writing a slide's voiceover
+  | "recording" // the voice model is speaking it
   | "waiting"; // waiting for the user's approval / answer
 export interface LlmActivity {
   projectId: string | null;

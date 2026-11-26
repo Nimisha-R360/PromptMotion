@@ -18,6 +18,9 @@ const ICON = {
   replay: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 5V1L7 6l5 5V7a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg>',
   loop: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z"/></svg>',
   fs: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M7 14H5v5h5v-2H7zm-2-4h2V7h3V5H5zm12 7h-3v2h5v-5h-2zM14 5v2h3v3h2V5z"/></svg>',
+  sound: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 9v6h4l5 5V4L7 9zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4M14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6"/></svg>',
+  muted: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 9v6h4l5 5V4L7 9zm18.7 1.4-1.4-1.4L18 11.3 15.7 9l-1.4 1.4 2.3 2.3-2.3 2.3 1.4 1.4 2.3-2.3 2.3 2.3 1.4-1.4-2.3-2.3z"/></svg>',
+  cc: '<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2m-8 7H9.5v-.5h-2v3h2V13H11v1a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1zm7 0h-1.5v-.5h-2v3h2V13H18v1a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1z"/></svg>',
 };
 
 /** Theme → CSS custom properties on :root (shared by the video player and the web page). */
@@ -61,6 +64,13 @@ export class Player {
   private ui!: { root: HTMLElement; play: HTMLButtonElement; time: HTMLElement; fill: HTMLElement; bar: HTMLElement; label: HTMLElement; loop: HTMLButtonElement };
   private hideTimer = 0;
   private lastPost = 0;
+  // voiceover: plays when the video plays and the viewer hasn't muted it; the browser may block sound until a click
+  private hasVoice = false;
+  private sound = true;
+  private blocked = false;
+  private captionsOn = true;
+  private caption?: { el: HTMLElement; key: string; words: HTMLElement[] };
+  private voiceUi?: { sound: HTMLButtonElement; cc: HTMLButtonElement; unmute: HTMLButtonElement };
 
   constructor(private spec: VideoSpec, private mount: HTMLElement) {
     this.loop = spec.loop ?? false;
@@ -102,6 +112,8 @@ export class Player {
       }
     });
     this.total = cursor;
+    this.hasVoice = this.scenes.some((sc) => sc.voice);
+    this.captionsOn = this.spec.captions !== false;
 
     if (this.spec.focus != null && this.scenes[this.spec.focus]) {
       const f = this.scenes[this.spec.focus];
@@ -150,6 +162,8 @@ export class Player {
     if (this.portrait) this.stage.style.height = hgt + "px";
     const k = Math.min(window.innerWidth / w, window.innerHeight / hgt);
     this.stage.style.transform = `translate(-50%, -50%) scale(${k})`;
+    // stage pixels per screen pixel: captions rise above the control bar (screen-sized) when it shows
+    document.documentElement.style.setProperty("--pm-k", String(k));
   }
 
   private buildUI() {
@@ -211,7 +225,7 @@ export class Player {
       if (document.fullscreenElement) document.exitFullscreen();
       else document.documentElement.requestFullscreen?.();
     };
-    root.append(play, replay, time, bar, label, loop, fs);
+    root.append(play, replay, time, bar, label, ...this.voiceControls(), loop, fs);
     document.body.appendChild(root);
     this.ui = { root, play, time, fill, bar, label, loop };
 
@@ -257,22 +271,143 @@ export class Player {
     });
   }
 
+  /** Sound and captions buttons, the captions line and the "click for sound" button (only when slides have a voiceover). */
+  private voiceControls(): HTMLElement[] {
+    if (!this.hasVoice) return [];
+    const sound = h("button", "pm-btn") as HTMLButtonElement;
+    sound.onclick = () => {
+      // a click is what browsers need before they let a page play sound
+      this.sound = this.blocked || !this.sound;
+      this.blocked = false;
+      this.syncVoice();
+      this.paintVoiceUi();
+    };
+    const cc = h("button", "pm-btn") as HTMLButtonElement;
+    cc.innerHTML = ICON.cc;
+    cc.setAttribute("aria-label", "Captions");
+    cc.onclick = () => {
+      this.captionsOn = !this.captionsOn;
+      this.syncVoice();
+      this.paintVoiceUi();
+    };
+    const unmute = h("button", "pm-unmute") as HTMLButtonElement;
+    unmute.innerHTML = `${ICON.muted}<span>Click for sound</span>`;
+    unmute.onclick = () => sound.click();
+    document.body.appendChild(unmute);
+    const line = h("div", "pm-captions");
+    line.setAttribute("aria-live", "off");
+    this.stage.appendChild(line);
+    this.caption = { el: line, key: "", words: [] };
+    this.voiceUi = { sound, cc, unmute };
+    // a hidden tab stops the clock: stop the voice with it (the next frame puts it back in sync)
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) this.scenes.forEach((sc) => sc.voice?.audio.pause());
+    });
+    this.paintVoiceUi();
+    return [sound, cc];
+  }
+
+  private paintVoiceUi() {
+    const ui = this.voiceUi;
+    if (!ui) return;
+    const on = this.sound && !this.blocked;
+    ui.sound.innerHTML = on ? ICON.sound : ICON.muted;
+    ui.sound.setAttribute("aria-label", on ? "Mute voiceover" : "Turn voiceover sound on");
+    ui.sound.classList.toggle("on", on);
+    ui.cc.classList.toggle("on", this.captionsOn);
+    ui.cc.setAttribute("aria-pressed", String(this.captionsOn));
+    ui.unmute.classList.toggle("show", this.blocked);
+  }
+
+  /** Play, pause and move each slide's voiceover with the clock, and show the sentence being spoken. */
+  private syncVoice() {
+    if (!this.hasVoice) return;
+    let spoken: { voice: NonNullable<Timed["voice"]>; local: number } | undefined;
+    for (const sc of this.scenes) {
+      const v = sc.voice;
+      if (!v) continue;
+      const local = this.t - sc.start - v.start;
+      const inside = local >= 0 && local < v.duration;
+      // captions stay a moment after the last word
+      if (local >= 0 && local < v.duration + 0.5) spoken = { voice: v, local };
+      const a = v.audio;
+      if (inside && this.playing && this.sound && !this.blocked) {
+        if (a.paused) {
+          try {
+            a.currentTime = local;
+          } catch {
+            /* not loaded yet: starts from the top */
+          }
+          a.play().catch((e: Error) => {
+            if (e.name !== "NotAllowedError") return;
+            this.blocked = true;
+            this.paintVoiceUi();
+          });
+        } else if (Math.abs(a.currentTime - local) > 0.3) a.currentTime = local;
+      } else if (!a.paused) a.pause();
+    }
+    this.paintCaption(this.captionsOn ? spoken : undefined);
+  }
+
+  private paintCaption(at: { voice: NonNullable<Timed["voice"]>; local: number } | undefined) {
+    const c = this.caption;
+    if (!c) return;
+    const caps = at?.voice.captions ?? [];
+    // the sentence being spoken (or the one just spoken, during the pause after it)
+    let i = -1;
+    for (let k = 0; k < caps.length; k++) if (at!.local >= caps[k].start - 0.05) i = k;
+    const cap = i >= 0 ? caps[i] : undefined;
+    const key = cap ? `${caps.indexOf(cap)}|${cap.text}` : "";
+    if (key !== c.key) {
+      c.key = key;
+      c.el.textContent = "";
+      c.words = [];
+      if (cap) {
+        const box = h("span", "pm-cap");
+        cap.text.split(/\s+/).forEach((w, k) => {
+          if (k) box.append(" ");
+          const sp = h("span", "", w);
+          box.append(sp);
+          c.words.push(sp);
+        });
+        c.el.append(box);
+      }
+      c.el.classList.toggle("show", !!cap);
+    }
+    if (!cap) return;
+    // each word lights up as it starts being said (timed from its length within the sentence)
+    const p = Math.min(1, Math.max(0, (at!.local - cap.start) / Math.max(0.1, cap.end - cap.start)));
+    const total = c.words.reduce((n, w) => n + w.textContent!.length + 1, 0);
+    let acc = 0;
+    for (const w of c.words) {
+      w.classList.toggle("pm-cap-on", acc <= p * total);
+      acc += w.textContent!.length + 1;
+    }
+  }
+
   private post(msg: unknown) {
     if (window.parent !== window) window.parent.postMessage(msg, "*");
   }
 
   play() {
     if (this.t >= this.total - 0.01) this.t = this.loopStart;
+    // a click on play is what the browser needed: the voiceover may now make sound
+    if (this.blocked && navigator.userActivation?.isActive) {
+      this.blocked = false;
+      this.paintVoiceUi();
+    }
     this.playing = true;
     this.last = performance.now();
     document.body.classList.add("pm-playing");
     this.ui.play.innerHTML = ICON.pause;
+    this.syncVoice();
   }
   pause() {
     this.playing = false;
     document.body.classList.remove("pm-playing");
     this.ui.play.innerHTML = ICON.play;
     document.body.classList.add("pm-ui-on");
+    this.syncVoice();
   }
   toggle() {
     if (this.playing) this.pause();
@@ -343,6 +478,7 @@ export class Player {
       this.ui.time.textContent = `${fmt(t)} / ${fmt(this.total)}`;
       this.ui.label.textContent = `Scene ${current + 1}/${this.scenes.length}`;
     }
+    this.syncVoice();
     const now = performance.now();
     if (now - this.lastPost > 200) {
       this.lastPost = now;

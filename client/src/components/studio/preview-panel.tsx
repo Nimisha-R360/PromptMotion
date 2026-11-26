@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Clapperboard, Download, Film, Loader2, Play, Sparkles, Upload, Clock, Layers, ChevronDown, Square, Monitor, Tablet, Smartphone, RotateCw, Globe, GraduationCap, Lightbulb, Rocket, ChartColumn, Pencil, type LucideIcon } from "lucide-react";
+import { Clapperboard, Download, Film, Loader2, Play, Sparkles, Upload, Clock, Layers, ChevronDown, Square, Monitor, Tablet, Smartphone, RotateCw, Globe, GraduationCap, Lightbulb, Rocket, ChartColumn, Pencil, Mic, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +31,7 @@ import { STYLES, STYLE_INFO, type Framework, type Slot } from "@backend/runtime/
 import { slotsFor } from "@backend/runtime/layouts";
 import { DeviceFrame, type Device } from "./device-frame";
 import { TextEditorDialog, type TextTarget } from "./text-editor";
+import { VoiceoverDialog, voiceState } from "./voiceover-dialog";
 
 const STATUS_STYLE = {
   pending: "bg-muted-foreground/40",
@@ -48,6 +49,7 @@ export function PreviewPanel({ studio, registry, recent }: { studio: Studio; reg
   // click-to-edit: the preview iframe reports which text was clicked (see runtime/index.ts, enableTextEditing)
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [editing, setEditing] = useState<{ index: number; target: TextTarget; key: number } | null>(null);
+  const [voiceOpen, setVoiceOpen] = useState(false);
   const isBusy = !!busy;
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -202,7 +204,7 @@ export function PreviewPanel({ studio, registry, recent }: { studio: Studio; reg
                   title={`Video preview (${device})`}
                   className="absolute inset-0 size-full"
                   sandbox="allow-scripts allow-popups"
-                  allow="fullscreen"
+                  allow="fullscreen; autoplay"
                 />
               ) : (
                 <EmptyPlayer stage={project.stage} index={previewIndex} busy={!!busy} />
@@ -255,6 +257,15 @@ export function PreviewPanel({ studio, registry, recent }: { studio: Studio; reg
               <Pencil className="size-3" /> Edit text
             </Button>
             <span className="mr-1 text-muted-foreground">or click any text in the preview</span>
+            {(() => {
+              const vs = voiceState(slide.spec, project.voiceover);
+              const label = !project.voiceover.on ? "off" : vs === "ready" ? `${slide.spec.voice!.duration.toFixed(0)}s` : vs === "stale" ? "out of date" : "not recorded";
+              return (
+                <Button size="sm" variant="outline" className={cn("h-6 gap-1 px-2 text-[11px]", project.voiceover.on && vs !== "ready" && "border-amber-500/50")} onClick={() => setVoiceOpen(true)} title="Voiceover and captions">
+                  <Mic className="size-3" /> Voiceover <span className="text-muted-foreground">{label}</span>
+                </Button>
+              );
+            })()}
             <Badge variant="outline" className="gap-1 text-[11px]">
               <Layers className="size-3" /> {slide.spec.layout}
             </Badge>
@@ -295,6 +306,8 @@ export function PreviewPanel({ studio, registry, recent }: { studio: Studio; reg
           </div>
         )}
       </div>
+
+      {voiceOpen && slide?.spec && <VoiceoverDialog key={previewIndex} studio={studio} index={previewIndex} onClose={() => setVoiceOpen(false)} />}
 
       {editing && editingSpec && (
         <TextEditorDialog

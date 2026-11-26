@@ -4,9 +4,10 @@ import { toast } from "sonner";
 import { api, streamProject } from "@/lib/api";
 import type { Project, SlideTextPatch } from "@backend/lib/types";
 import type { StartOptions } from "@backend/lib/start-options";
+import type { VoiceSettings } from "@backend/lib/voice/voices";
 
 export interface BusyState {
-  kind: "outline" | "slide" | "upload" | "create" | "agent";
+  kind: "outline" | "slide" | "upload" | "create" | "agent" | "voice";
   /** tool the Director agent is currently running */
   tool?: string;
   index?: number;
@@ -320,6 +321,56 @@ export function useStudio() {
     [project],
   );
 
+  /**
+   * Voiceover: write (when missing, or `rewrite`) and record slide `index`'s narration, or every designed slide's when
+   * `index` is left out. Runs the local voice model on the server; progress shows like a slide design.
+   */
+  const makeVoiceover = useCallback(
+    (index?: number, rewrite = false) => {
+      if (!project) return Promise.resolve(null);
+      const what = index == null ? "every slide" : `slide ${index + 1}`;
+      return run(
+        { kind: "voice", index, status: rewrite ? `Rewriting the voiceover for ${what}…` : `Making the voiceover for ${what}…`, phase: "narrating" },
+        `/api/projects/${project.id}/voice`,
+        { index, rewrite, projectId: project.id },
+      );
+    },
+    [project, run],
+  );
+
+  /** Voiceover settings. Switching it on records every designed slide right away. */
+  const setVoiceover = useCallback(
+    async (patch: Partial<VoiceSettings>) => {
+      if (!project) return;
+      try {
+        const p = await api.patch(project.id, { voiceover: patch });
+        setProject(p);
+        const changed = patch.on || (p.voiceover.on && (patch.voice !== undefined || patch.speed !== undefined));
+        if (changed && p.slides.some((s) => s.spec)) await makeVoiceover();
+      } catch (e) {
+        toast.error((e as Error).message);
+      }
+    },
+    [project, makeVoiceover],
+  );
+
+  /** Save the narration typed for slide `index` and, with voiceover on, record it again. Returns true when saved. */
+  const editNarration = useCallback(
+    async (index: number, narration: string) => {
+      if (!project?.slides[index]?.spec) return false;
+      try {
+        const p = await api.patchSlide(project.id, index, { text: { narration } });
+        setProject(p);
+        if (p.voiceover.on && narration.trim()) await makeVoiceover(index);
+        return true;
+      } catch (e) {
+        toast.error((e as Error).message);
+        return false;
+      }
+    },
+    [project, makeVoiceover],
+  );
+
   const cancel = useCallback(() => abortRef.current?.abort(), []);
 
   // the URL is the source of truth for which project is open
@@ -343,6 +394,9 @@ export function useStudio() {
     send,
     applyComponent,
     applyCard,
+    makeVoiceover,
+    setVoiceover,
+    editNarration,
     setSlideStyle,
     editSlideText,
     setTheme,

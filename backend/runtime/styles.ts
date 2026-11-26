@@ -202,6 +202,10 @@ html.pm-web-root,html.pm-web-root body{height:auto;overflow-x:hidden;overflow-y:
 .pm-rc-fill{position:absolute;inset:0}
 .pm-rc-icon{position:absolute;right:110px;top:90px;width:180px;height:180px}
 .pm-portrait .pm-rc-icon{right:70px;top:70px;width:150px;height:150px}
+/* Onda text reveals: an invisible copy keeps the layout, the add-on draws over it */
+.pm-onda-ghost{display:inline-block;max-width:100%;visibility:hidden}
+.pm-onda-box{position:absolute;pointer-events:none}
+.pm-onda-paint *{background:inherit;-webkit-background-clip:text;background-clip:text}
 .pm-l-showcase .pm-content{align-items:center;text-align:center;justify-content:flex-start;padding:70px 110px 60px;gap:18px}
 .pm-l-showcase .pm-sub{font-size:32px}
 .pm-showcase{position:relative;flex:1;width:100%;min-height:0;border-radius:28px;overflow:hidden}
@@ -226,5 +230,16 @@ body.pm-ui-on .pm-controls,body:not(.pm-playing) .pm-controls{opacity:1;transfor
 .pm-bigplay svg{width:44px;height:44px}
 body.pm-playing .pm-bigplay{opacity:0;pointer-events:none;transform:scale(.8)}
 @media (max-width:520px){.pm-scene-label,.pm-time{display:none}}
+/* voiceover captions: the sentence being spoken, its words lighting up as they're said */
+.pm-captions{position:absolute;left:50%;bottom:64px;transform:translateX(-50%);z-index:50;width:max-content;max-width:min(1500px,88%);text-align:center;pointer-events:none;opacity:0;transition:opacity .2s,bottom .25s}
+body.pm-ui-on .pm-captions,body:not(.pm-playing) .pm-captions{bottom:calc(84px / var(--pm-k, 1) + 16px)}
+.pm-captions.show{opacity:1}
+.pm-cap{display:inline;padding:10px 22px;border-radius:14px;background:rgba(8,8,12,.72);color:rgba(255,255,255,.6);font:600 38px/1.45 var(--pm-font);-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.pm-cap .pm-cap-on{color:#fff}
+.pm-portrait .pm-captions{bottom:150px;max-width:92%}
+.pm-portrait .pm-cap{font-size:44px}
+.pm-unmute{position:fixed;top:14px;right:14px;z-index:101;display:none;align-items:center;gap:8px;padding:8px 14px 8px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.2);background:rgba(10,10,14,.8);color:#fff;font:600 13px/1 ui-sans-serif,system-ui,sans-serif;cursor:pointer;backdrop-filter:blur(10px)}
+.pm-unmute.show{display:flex}
+.pm-unmute:focus-visible{outline:2px solid #fff;outline-offset:2px}
 @media (prefers-reduced-motion: reduce){.pm-controls{transition:none}}
 `;

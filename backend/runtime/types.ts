@@ -110,9 +110,29 @@ export interface SlideSpec {
   style?: SlideStyle;
   /** an Onda card drawn on this slide (runtime/cards.ts), filled with the slide's words */
   card?: string;
+  /** what the voiceover says over this slide (written by the AI, editable) */
+  narration?: string;
+  /** the user typed the narration: a redesign keeps it */
+  narrationEdited?: boolean;
+  /** the spoken narration (made by the local voice model from `narration`) */
+  voice?: SlideVoice;
   /** seconds */
   duration: number;
   note?: string;
+}
+
+/** A slide's recorded voiceover. */
+export interface SlideVoice {
+  /** MP3: `asset:<id>` in the project, a data URI in pages */
+  src: string;
+  /** seconds */
+  duration: number;
+  /** the narration it was made from (the slide's `narration` differs when the audio is out of date) */
+  text: string;
+  voice: string;
+  speed: number;
+  /** one caption per sentence, in seconds from the start of the audio */
+  captions: { text: string; start: number; end: number }[];
 }
 
 export interface VideoSpec {
@@ -126,6 +146,8 @@ export interface VideoSpec {
   format?: "video" | "web";
   /** show a single slide looping (review mode) */
   focus?: number;
+  /** show voiceover captions (when slides have a voiceover) */
+  captions?: boolean;
   /** demo mode label shown in corner (library previews) */
   badge?: string;
   /** studio preview only: clicking a text tells the parent window which text to edit (never set in exports) */
