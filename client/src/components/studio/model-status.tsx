@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Cloud, Cpu, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { LlmStatus } from "@/lib/api";
@@ -59,16 +59,18 @@ export function ModelStatus({
     };
   }, [activeStart]);
 
+  // the local model's name is a file path: show just the file in the tooltip
+  const modelName = llm?.model?.split(/[\\/]/).pop() ?? "The model";
   let dot = "bg-muted-foreground";
-  let text = "Checking model…";
+  let text = "Checking AI…";
   let tip = "Looking for the local llama.cpp server";
   if (llm && !llm.online) {
     dot = "bg-amber-400";
-    text = "Model offline · rule-based";
-    tip = "Start the model with: npm run llm";
+    text = "AI offline";
+    tip = "The rule-based designer is used meanwhile. Start the model with: npm run llm";
     if (cloud) {
-      text = `${cloudName} unavailable · rule-based`;
-      tip = `${llm.error ?? `Check your ${cloudName} API key and model name.`} Click to open model settings.`;
+      text = `${cloudName} offline`;
+      tip = `${llm.error ?? `Check your ${cloudName} API key and model name.`} The rule-based designer is used meanwhile. Click to open model settings.`;
     }
   } else if (active) {
     dot = "bg-primary";
@@ -77,10 +79,10 @@ export function ModelStatus({
     tip = active.label;
   } else if (llm?.online) {
     dot = "bg-emerald-400";
-    text = llm.warm ? (cloud ? `${cloudName} · Ready` : "Ready") : "Loading design guide…";
+    text = llm.warm ? (cloud ? `${cloudName} ready` : "AI ready") : "AI warming up…";
     tip = llm.warm
-      ? `${llm.model} is idle and its design guide is cached: requests start immediately`
-      : `${llm.model} is pre-reading its design guide in the background (~40s once per server start)`;
+      ? `${modelName} is idle and its design guide is cached: requests start immediately. Click for model settings.`
+      : `${modelName} is pre-reading its design guide in the background (~40s once per server start)`;
     if (cloud) tip = `Agents run on ${cloudName} (${llm.model}). Click to change the model.`;
   }
 
@@ -92,11 +94,9 @@ export function ModelStatus({
           type="button"
           onClick={() => setSettingsOpen(true)}
           aria-label="Model settings"
-          className="hidden items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none sm:flex"
+          className="hidden h-8 items-center gap-2 rounded-full border px-3 text-xs text-muted-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none sm:flex"
         >
-          {active ? <Loader2 className="size-3 animate-spin text-primary" /> : <span className={cn("size-1.5 rounded-full", dot)} />}
-          {cloud ? <Cloud className="size-3.5" /> : <Cpu className="size-3.5" />}
-          {llm?.model && <span className="hidden lg:inline">{llm.model} ·</span>}
+          {active ? <Loader2 className="size-3.5 animate-spin text-primary" /> : <span className={cn("size-2 rounded-full", dot)} />}
           <span role="status" aria-live="polite" className={cn(active && "text-foreground")}>{text}</span>
         </button>
       </TooltipTrigger>

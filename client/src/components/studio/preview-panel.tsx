@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Clapperboard, Download, Film, Loader2, Play, Sparkles, Upload, Clock, Layers, ChevronDown, Square, Monitor, Tablet, Smartphone, RotateCw, Globe, GraduationCap, Lightbulb, Rocket, ChartColumn, Pencil, Mic, type LucideIcon } from "lucide-react";
+import { Clapperboard, Film, Loader2, Sparkles, Upload, Clock, Monitor, Tablet, Smartphone, RotateCw, GraduationCap, Lightbulb, Rocket, ChartColumn, Pencil, Mic, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { Registry } from "@/lib/api";
@@ -27,11 +25,11 @@ import {
   type TemplateId,
 } from "@backend/lib/start-options";
 import { FrameworkDot } from "./library-panel";
-import { STYLES, STYLE_INFO, type Framework, type Slot } from "@backend/runtime/types";
-import { slotsFor } from "@backend/runtime/layouts";
 import { DeviceFrame, type Device } from "./device-frame";
 import { TextEditorDialog, type TextTarget } from "./text-editor";
-import { VoiceoverDialog, voiceState } from "./voiceover-dialog";
+import { voiceState } from "./voice-panel";
+import { SlideThumb } from "./slide-thumb";
+import type { PanelId } from "./tool-rail";
 
 const STATUS_STYLE = {
   pending: "bg-muted-foreground/40",
@@ -39,7 +37,7 @@ const STATUS_STYLE = {
   approved: "bg-emerald-400",
 } as const;
 
-export function PreviewPanel({ studio, registry, recent }: { studio: Studio; registry: Registry | null; recent: ProjectSummary[] }) {
+export function PreviewPanel({ studio, registry, recent, onOpenPanel }: { studio: Studio; registry: Registry | null; recent: ProjectSummary[]; onOpenPanel: (panel: PanelId) => void }) {
   const { project, busy, previewIndex, scope } = studio;
   // app view: preview the same HTML at a tablet / mobile viewport (hooks must run before the early return)
   const [device, setDevice] = useState<Device>("desktop");
@@ -49,7 +47,6 @@ export function PreviewPanel({ studio, registry, recent }: { studio: Studio; reg
   // click-to-edit: the preview iframe reports which text was clicked (see runtime/index.ts, enableTextEditing)
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [editing, setEditing] = useState<{ index: number; target: TextTarget; key: number } | null>(null);
-  const [voiceOpen, setVoiceOpen] = useState(false);
   const isBusy = !!busy;
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -83,116 +80,57 @@ export function PreviewPanel({ studio, registry, recent }: { studio: Studio; reg
     ? `/api/projects/${project.id}/preview?scope=${scope}&index=${previewIndex}&format=${format}&edit=1&v=${encodeURIComponent(project.updatedAt + project.theme)}`
     : null;
   const busyHere = busy && (busy.kind !== "slide" || busy.index === previewIndex || scope === "all");
+  const theme = registry?.themes.find((t) => t.id === project.theme);
+  // one control for what the player shows: this slide, the whole video, or the web page
+  const view = format === "web" ? "web" : scope;
+  const setView = (v: string) => {
+    if (v === "web") return setFormat("web");
+    setFormat("video");
+    studio.setScope(v as "slide" | "all");
+  };
+  const showSlideActions = !!slide?.spec && view === "slide";
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
-        <Tabs value={format === "web" ? "all" : scope} onValueChange={(v) => studio.setScope(v as "slide" | "all")}>
-          <TabsList className="h-8">
-            <TabsTrigger value="slide" className="text-xs" disabled={format === "web"}>
-              <Square className="size-3.5" /> Slide {previewIndex + 1}
+        <Tabs value={view} onValueChange={setView}>
+          <TabsList className="h-8" aria-label="What to preview">
+            <TabsTrigger value="slide" className="px-3 text-xs">
+              Slide {previewIndex + 1}
             </TabsTrigger>
-            <TabsTrigger value="all" className="text-xs" disabled={!designed}>
-              <Film className="size-3.5" /> Full video
+            <TabsTrigger value="all" className="px-3 text-xs" disabled={!designed}>
+              Full video
             </TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <Tabs value={format} onValueChange={(v) => setFormat(v as "video" | "web")}>
-          <TabsList className="h-8" aria-label="Output format">
-            <TabsTrigger value="video" className="text-xs" title="Video: timed player with transitions">
-              <Film className="size-3.5" /> <span className="hidden xl:inline">Video</span>
-            </TabsTrigger>
-            <TabsTrigger value="web" className="text-xs" title="Web page: scrolling sections, animations on scroll">
-              <Globe className="size-3.5" /> <span className="hidden xl:inline">Web page</span>
+            <TabsTrigger value="web" className="px-3 text-xs" disabled={!designed} title="The same slides as a scrolling web page, animated on scroll">
+              Web page
             </TabsTrigger>
           </TabsList>
         </Tabs>
-        <Tabs value={device} onValueChange={(v) => setDevice(v as Device)}>
-          <TabsList className="h-8" aria-label="Preview device">
-            <TabsTrigger value="desktop" className="text-xs" title="Desktop (16:9)">
-              <Monitor className="size-3.5" /> <span className="hidden xl:inline">Desktop</span>
-            </TabsTrigger>
-            <TabsTrigger value="tablet" className="text-xs" title="Tablet app view">
-              <Tablet className="size-3.5" /> <span className="hidden xl:inline">Tablet</span>
-            </TabsTrigger>
-            <TabsTrigger value="mobile" className="text-xs" title="Mobile app view">
-              <Smartphone className="size-3.5" /> <span className="hidden xl:inline">Mobile</span>
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-        {device !== "desktop" && (
-          <Button variant="outline" size="icon" className="size-8" onClick={() => setLandscape((l) => !l)} aria-label={landscape ? "Rotate to portrait" : "Rotate to landscape"} title={landscape ? "Portrait" : "Landscape"}>
-            <RotateCw className={cn("size-3.5 transition-transform", landscape && "rotate-90")} />
-          </Button>
-        )}
-        <span className="text-xs text-muted-foreground tabular-nums">
-          {approved}/{project.slides.length} approved
-        </span>
         <div className="ml-auto flex items-center gap-2">
-          <Select value={project.theme} onValueChange={studio.setTheme}>
-            <SelectTrigger size="sm" className="h-8 w-[150px] text-xs" aria-label="Video theme">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {registry?.themes.map((t) => (
-                <SelectItem key={t.id} value={t.id} className="text-xs">
-                  <span className="flex items-center gap-2">
-                    <span className="flex">
-                      <span className="size-3 rounded-full border" style={{ background: t.bg }} />
-                      <span className="-ml-1 size-3 rounded-full" style={{ background: t.accent }} />
-                      <span className="-ml-1 size-3 rounded-full" style={{ background: t.accent2 }} />
-                    </span>
-                    {t.name}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="sm" disabled={!designed}>
-                <Download /> Export <ChevronDown className="opacity-70" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuItem asChild disabled={!approved}>
-                <a href={`/api/projects/${project.id}/export`} download>
-                  <Download /> Approved slides ({approved}) · .html
-                </a>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <a href={`/api/projects/${project.id}/export?draft=1`} download>
-                  <Clapperboard /> Draft incl. slides in review ({designed})
-                </a>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild disabled={!approved}>
-                <a href={`/api/projects/${project.id}/export?format=web`} download>
-                  <Globe /> Web page: approved slides ({approved}) · .html
-                </a>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <a href={`/api/projects/${project.id}/export?format=web&draft=1`} download>
-                  <Globe /> Web page: draft incl. slides in review ({designed})
-                </a>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <a href={`/api/projects/${project.id}/preview?scope=all`} target="_blank" rel="noreferrer">
-                  <Play /> Open full video in new tab
-                </a>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <a href={`/api/projects/${project.id}/preview?scope=all&format=web`} target="_blank" rel="noreferrer">
-                  <Globe /> Open web page in new tab
-                </a>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {device !== "desktop" && (
+            <Button variant="ghost" size="icon" className="size-8" onClick={() => setLandscape((l) => !l)} aria-label={landscape ? "Rotate to portrait" : "Rotate to landscape"} title={landscape ? "Portrait" : "Landscape"}>
+              <RotateCw className={cn("size-3.5 transition-transform", landscape && "rotate-90")} />
+            </Button>
+          )}
+          <Tabs value={device} onValueChange={(v) => setDevice(v as Device)}>
+            <TabsList className="h-8" aria-label="Preview device">
+              <TabsTrigger value="desktop" className="px-2" aria-label="Desktop" title="Desktop (16:9)">
+                <Monitor className="size-4" />
+              </TabsTrigger>
+              <TabsTrigger value="tablet" className="px-2" aria-label="Tablet" title="Tablet app view">
+                <Tablet className="size-4" />
+              </TabsTrigger>
+              <TabsTrigger value="mobile" className="px-2" aria-label="Mobile" title="Mobile app view">
+                <Smartphone className="size-4" />
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
       </div>
 
-      {/* player */}
-      <div className="pm-grid-bg relative flex min-h-0 flex-1 items-center justify-center p-4 lg:p-6">
+      {/* player, and the slide's quick actions under it */}
+      <div className="pm-grid-bg relative flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-4 lg:p-6">
         {(() => {
           const screen = (
             <>
@@ -213,101 +151,89 @@ export function PreviewPanel({ studio, registry, recent }: { studio: Studio; reg
             </>
           );
           return device === "desktop" ? (
-            <div className="relative aspect-video w-full max-w-[min(100%,calc((100dvh-260px)*16/9))] overflow-hidden rounded-xl border bg-black shadow-2xl shadow-black/50">{screen}</div>
+            <div className="relative aspect-video w-full max-w-[min(100%,calc((100dvh-330px)*16/9))] overflow-hidden rounded-xl border bg-black shadow-2xl shadow-black/50">{screen}</div>
           ) : (
             <DeviceFrame device={device} landscape={landscape}>
               {screen}
             </DeviceFrame>
           );
         })()}
-      </div>
-
-      {/* filmstrip + inspector */}
-      <div className="border-t bg-sidebar/60">
-        <ScrollArea className="w-full">
-          <ol className="flex gap-2 px-4 py-3" aria-label="Slides">
-            {project.slides.map((s) => (
-              <li key={s.index}>
-                <button
-                  onClick={() => {
-                    studio.setPreviewIndex(s.index);
-                    studio.setScope("slide");
-                  }}
-                  aria-current={s.index === previewIndex && scope === "slide"}
-                  className={cn(
-                    "flex w-44 flex-col gap-1 rounded-lg border bg-card/60 p-2 text-left transition-colors hover:border-primary/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                    s.index === previewIndex && scope === "slide" && "border-primary/70 bg-primary/10",
-                  )}
-                >
-                  <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                    <span className={cn("size-1.5 rounded-full", STATUS_STYLE[s.status])} />
-                    {String(s.index + 1).padStart(2, "0")} · {s.spec?.layout ?? s.brief.layout ?? "slide"}
-                    {busy?.kind === "slide" && busy.index === s.index && <Loader2 className="ml-auto size-3 animate-spin text-primary" />}
-                  </span>
-                  <span className="truncate text-xs font-medium">{s.spec?.title ?? s.brief.title}</span>
-                </button>
-              </li>
-            ))}
-          </ol>
-          <ScrollBar orientation="horizontal" />
-        </ScrollArea>
-        {slide?.spec && scope === "slide" && (
-          <div className="flex flex-wrap items-center gap-1.5 border-t px-4 py-2 text-[11px]">
-            <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[11px]" onClick={() => openEditor(previewIndex)} disabled={!!busy} title="Or click any text in the preview">
-              <Pencil className="size-3" /> Edit text
+        {showSlideActions && slide.spec && (
+          <div className="flex flex-wrap items-center justify-center gap-1.5">
+            <Button size="sm" variant="outline" className="h-8 bg-background/60 text-xs" onClick={() => openEditor(previewIndex)} disabled={isBusy} title="Or click any text in the preview">
+              <Pencil /> Edit text
             </Button>
-            <span className="mr-1 text-muted-foreground">or click any text in the preview</span>
             {(() => {
               const vs = voiceState(slide.spec, project.voiceover);
               const label = !project.voiceover.on ? "off" : vs === "ready" ? `${slide.spec.voice!.duration.toFixed(0)}s` : vs === "stale" ? "out of date" : "not recorded";
               return (
-                <Button size="sm" variant="outline" className={cn("h-6 gap-1 px-2 text-[11px]", project.voiceover.on && vs !== "ready" && "border-amber-500/50")} onClick={() => setVoiceOpen(true)} title="Voiceover and captions">
-                  <Mic className="size-3" /> Voiceover <span className="text-muted-foreground">{label}</span>
+                <Button size="sm" variant="outline" className={cn("h-8 bg-background/60 text-xs", project.voiceover.on && vs !== "ready" && "border-amber-500/50")} onClick={() => onOpenPanel("voice")} title="Voiceover and captions">
+                  <Mic /> Voiceover <span className="text-muted-foreground">{label}</span>
                 </Button>
               );
             })()}
-            <Badge variant="outline" className="gap-1 text-[11px]">
-              <Layers className="size-3" /> {slide.spec.layout}
-            </Badge>
-            <Badge variant="outline" className="gap-1 text-[11px]">
-              <Clock className="size-3" /> {slide.spec.duration}s
-            </Badge>
-            <Select value={slide.spec.style ?? STYLES[slide.index % STYLES.length]} onValueChange={studio.setSlideStyle} disabled={!!busy}>
-              <SelectTrigger size="sm" className="h-6 gap-1 px-2 text-[11px]" aria-label="Slide style">
-                <span className="text-muted-foreground">style</span>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {STYLES.map((st) => (
-                  <SelectItem key={st} value={st} className="text-xs" title={STYLE_INFO[st]}>
-                    {st}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {slotsFor(slide.spec.layout).map((slotName: Slot) => {
-              const id = slide.spec!.animations[slotName];
-              const meta = registry?.components.find((c) => c.id === id);
-              return (
-                <Tooltip key={slotName}>
-                  <TooltipTrigger asChild>
-                    <span className="flex items-center gap-1 rounded-md border bg-card/60 px-1.5 py-0.5">
-                      <span className="text-muted-foreground">{slotName}</span>
-                      <FrameworkDot fw={(id ?? "").split(".")[0] as Framework} />
-                      {meta?.name ?? id}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <code className="font-mono">{id}</code>
-                  </TooltipContent>
-                </Tooltip>
-              );
-            })}
+            <Button size="sm" variant="outline" className="h-8 bg-background/60 text-xs" onClick={() => onOpenPanel("slide")} title="Style and animations of this slide">
+              <Sparkles /> Animations
+            </Button>
+            <span className="flex items-center gap-1 px-2 text-xs text-muted-foreground" title="How long the slide plays">
+              <Clock className="size-3.5" /> {slide.spec.duration}s
+            </span>
           </div>
         )}
       </div>
 
-      {voiceOpen && slide?.spec && <VoiceoverDialog key={previewIndex} studio={studio} index={previewIndex} onClose={() => setVoiceOpen(false)} />}
+      {/* filmstrip */}
+      <div className="flex items-start gap-4 border-t bg-sidebar/60 px-4 pt-3">
+        <div className="hidden shrink-0 flex-col gap-0.5 pt-0.5 sm:flex">
+          <span className="text-xs font-semibold">Slides</span>
+          <span className="text-[11px] text-muted-foreground tabular-nums">
+            {approved} of {project.slides.length} approved
+          </span>
+        </div>
+        <ScrollArea className="min-w-0 flex-1">
+          <ol className="flex gap-3 pb-3" aria-label="Slides">
+            {project.slides.map((s) => {
+              const current = s.index === previewIndex && view === "slide";
+              const title = s.spec?.title ?? s.brief.title;
+              const working = busy?.kind === "slide" && busy.index === s.index;
+              return (
+                <li key={s.index}>
+                  <button
+                    onClick={() => {
+                      studio.setPreviewIndex(s.index);
+                      setView("slide");
+                    }}
+                    aria-current={current}
+                    aria-label={`Slide ${s.index + 1}: ${title} (${s.status === "review" ? "in review" : s.status})`}
+                    className="group flex w-32 flex-col gap-1.5 text-left focus-visible:outline-none"
+                  >
+                    <span
+                      className={cn(
+                        "relative block aspect-video w-full overflow-hidden rounded-md border transition-colors group-hover:border-primary/50 group-focus-visible:ring-2 group-focus-visible:ring-ring",
+                        current && "border-primary ring-1 ring-primary",
+                        !s.spec && "border-dashed",
+                      )}
+                    >
+                      {s.spec ? <SlideThumb layout={s.spec.layout} theme={theme} /> : <span className="flex size-full items-center justify-center text-[10px] text-muted-foreground">Not designed yet</span>}
+                      <span className="absolute top-1 left-1 flex items-center gap-1 rounded-full bg-black/70 px-1.5 py-px text-[10px] text-white tabular-nums">
+                        <span className={cn("size-1.5 rounded-full", STATUS_STYLE[s.status])} />
+                        {String(s.index + 1).padStart(2, "0")}
+                      </span>
+                      {working && (
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/50">
+                          <Loader2 className="size-4 animate-spin text-white" />
+                        </span>
+                      )}
+                    </span>
+                    <span className={cn("truncate text-xs", current ? "font-medium text-foreground" : "text-muted-foreground")}>{title}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+          <ScrollBar orientation="horizontal" />
+        </ScrollArea>
+      </div>
 
       {editing && editingSpec && (
         <TextEditorDialog

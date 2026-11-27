@@ -1,25 +1,40 @@
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 import { formatDistanceToNowStrict } from "date-fns";
-import { Clapperboard, FolderOpen, Keyboard, Moon, Plus, Search, Sun, Trash2 } from "lucide-react";
+import { ChevronDown, Clapperboard, Cpu, FolderOpen, Keyboard, Moon, MoreHorizontal, Plus, Search, Sun, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { api, type LlmStatus, type Registry } from "@/lib/api";
 import { useStudio } from "@/hooks/use-studio";
 import type { ProjectSummary } from "@backend/lib/types";
-import { LibraryPanel } from "./library-panel";
+import { SLOT_CATEGORY } from "@backend/runtime/types";
+import { LibraryPanel, type LibraryCategory } from "./library-panel";
 import { PreviewPanel } from "./preview-panel";
-import { ChatPanel } from "./chat-panel";
+import { ChatFolded, ChatPanel } from "./chat-panel";
 import { ModelStatus } from "./model-status";
 import { CommandPalette, MOD, ShortcutsDialog } from "./command-palette";
+import { ExportMenu } from "./export-menu";
+import { PanelShell, ToolRail, type PanelId } from "./tool-rail";
+import { SlidePanel } from "./slide-panel";
+import { ThemePanel } from "./theme-panel";
+import { VoicePanel } from "./voice-panel";
 
 /** true while the user is typing somewhere, so single-key shortcuts don't steal their keystrokes */
 const typing = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || !!t.closest("[role=dialog],[role=listbox],[role=menu]"));
+
+const CHAT_OPEN_KEY = "pm-chat-open";
+/** The chat starts open, unless the user folded it last time (or the window is narrow). */
+function initialChatOpen() {
+  try {
+    const saved = localStorage.getItem(CHAT_OPEN_KEY);
+    if (saved) return saved === "1";
+  } catch {
+    /* storage blocked: use the default */
+  }
+  return typeof window === "undefined" || window.innerWidth >= 1100;
+}
 
 export function Studio() {
   const studio = useStudio();
@@ -31,6 +46,18 @@ export function Studio() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toDelete, setToDelete] = useState<{ id: string; title: string } | null>(null);
   const { resolvedTheme, setTheme } = useTheme();
+  // the side panel the tool rail opened (one at a time), the library's open category, and the chat column
+  const [panel, setPanel] = useState<PanelId | null>(null);
+  const [libraryCategory, setLibraryCategory] = useState<LibraryCategory>(null);
+  const [chatOpen, setChatOpenState] = useState(initialChatOpen);
+  const setChatOpen = (open: boolean) => {
+    setChatOpenState(open);
+    try {
+      localStorage.setItem(CHAT_OPEN_KEY, open ? "1" : "0");
+    } catch {
+      /* storage blocked: remembered for this visit only */
+    }
+  };
 
   useEffect(() => {
     api.registry().then(setRegistry).catch((e) => toast.error(`Could not load component library: ${e.message}`));
@@ -51,6 +78,8 @@ export function Studio() {
 
   const project = studio.project;
   const currentSpec = project?.slides[studio.previewIndex]?.spec ?? null;
+  // without an open video only the library makes sense
+  const shownPanel = panel && (project || panel === "library") ? panel : null;
 
   // keep the browser tab title in step with the open video
   useEffect(() => {
@@ -71,7 +100,7 @@ export function Studio() {
     }
   };
 
-  // global shortcuts: ⌘K palette, / focus message, ←/→ slides, Alt+N new video, Esc stop, ? help
+  // global shortcuts: ⌘K palette, / focus message, ←/→ slides, Alt+N new video, Esc stop or close the panel, ? help
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -96,6 +125,8 @@ export function Studio() {
         setShortcutsOpen(true);
       } else if (e.key === "Escape" && studio.busy) {
         studio.cancel();
+      } else if (e.key === "Escape" && panel) {
+        setPanel(null);
       } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && project?.slides.length) {
         e.preventDefault();
         const next = Math.min(project.slides.length - 1, Math.max(0, studio.previewIndex + (e.key === "ArrowLeft" ? -1 : 1)));
@@ -105,147 +136,171 @@ export function Studio() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [studio, project]);
+  }, [studio, project, panel]);
+
+  const openLibrary = (category: LibraryCategory) => {
+    setLibraryCategory(category);
+    setPanel("library");
+  };
+  const slideLabel = `Slide ${studio.previewIndex + 1}`;
+  const panelView: Record<PanelId, { title: string; subtitle?: string; body: React.ReactNode }> = {
+    library: {
+      title: "Library",
+      subtitle: currentSpec ? `for slide ${studio.previewIndex + 1}` : undefined,
+      body: (
+        <LibraryPanel
+          registry={registry}
+          theme={project?.theme ?? "midnight"}
+          currentSpec={currentSpec}
+          currentIndex={studio.previewIndex}
+          onApply={studio.applyComponent}
+          onApplyCard={studio.applyCard}
+          category={libraryCategory}
+          onCategoryChange={setLibraryCategory}
+        />
+      ),
+    },
+    slide: {
+      title: "Slide settings",
+      subtitle: slideLabel,
+      body: (
+        <SlidePanel
+          studio={studio}
+          registry={registry}
+          onChangeSlot={(slot) => openLibrary(SLOT_CATEGORY[slot] === "scene" ? "remocn" : SLOT_CATEGORY[slot])}
+          onChangeCard={() => openLibrary("card")}
+        />
+      ),
+    },
+    voice: {
+      title: "Voiceover",
+      subtitle: slideLabel,
+      body: project && <VoicePanel key={`${studio.previewIndex}:${currentSpec?.narration ?? ""}`} studio={studio} index={studio.previewIndex} />,
+    },
+    theme: {
+      title: "Theme",
+      subtitle: "the whole video",
+      body: <ThemePanel registry={registry} value={project?.theme ?? ""} onPick={studio.setTheme} disabled={!!studio.busy} />,
+    },
+  };
 
   return (
     <div className="flex h-dvh flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
-        <button onClick={() => studio.openProject(null)} className="flex items-center gap-2 rounded-md px-1 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none" aria-label="Prompt Motion home">
-          <span className="flex size-7 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-cyan-400 text-white">
+      <header className="flex h-12 shrink-0 items-center gap-1.5 border-b px-3">
+        <button
+          onClick={() => studio.openProject(null)}
+          className="flex items-center gap-2 rounded-md px-1 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          aria-label="Prompt Motion: home"
+        >
+          <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <Clapperboard className="size-4" />
           </span>
-          <span className="text-sm font-semibold tracking-tight">Prompt Motion</span>
+          <span className="hidden text-sm font-semibold tracking-tight md:inline">Prompt Motion</span>
         </button>
-        {project && (
-          <>
-            <span className="text-muted-foreground/40">/</span>
-            <span className="max-w-[40vw] truncate text-sm text-muted-foreground" title={project.title}>
-              {project.title}
-            </span>
-          </>
-        )}
+        <span className="text-muted-foreground/40" aria-hidden>
+          /
+        </span>
 
-        <button
-          type="button"
-          onClick={() => setPaletteOpen(true)}
-          className="mx-auto hidden h-8 w-full max-w-xs items-center gap-2 rounded-md border bg-muted/30 px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none md:flex"
-          aria-label="Open the command palette"
-        >
-          <Search className="size-3.5" />
-          <span>Search projects, slides, actions…</span>
-          <KbdGroup className="ml-auto">
-            <Kbd>{MOD}</Kbd>
-            <Kbd>K</Kbd>
-          </KbdGroup>
-        </button>
+        {/* the open video; its menu lists the other projects */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="max-w-[40vw] gap-1.5 font-medium" aria-label={project ? `${project.title}: switch project` : "Projects"}>
+              {project ? (
+                <span className="truncate">{project.title}</span>
+              ) : (
+                <>
+                  <FolderOpen /> Projects
+                </>
+              )}
+              <ChevronDown className="opacity-60" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-80">
+            <DropdownMenuLabel>Recent projects</DropdownMenuLabel>
+            {!recent.length && <p className="px-2 py-1.5 text-xs text-muted-foreground">No projects yet. Describe a video to make your first one.</p>}
+            {recent.slice(0, 12).map((p) => (
+              <DropdownMenuItem key={p.id} onSelect={() => studio.openProject(p.id)} className="group/item flex items-center gap-2">
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5">
+                    {project?.id === p.id && <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-label="open" />}
+                    <span className="block truncate text-xs">{p.title}</span>
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    <span className="h-1 w-10 overflow-hidden rounded-full bg-muted">
+                      <span className="block h-full rounded-full bg-primary" style={{ width: `${p.slideCount ? (p.approvedCount / p.slideCount) * 100 : 0}%` }} />
+                    </span>
+                    {p.approvedCount}/{p.slideCount} approved
+                    {p.updatedAt && <> · {formatDistanceToNowStrict(new Date(p.updatedAt), { addSuffix: true })}</>}
+                  </span>
+                </span>
+                <button
+                  aria-label={`Delete ${p.title}`}
+                  className="rounded p-1 text-muted-foreground opacity-60 transition-opacity group-hover/item:opacity-100 hover:bg-destructive/20 hover:text-destructive"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setToDelete(p);
+                  }}
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => studio.openProject(null)}>
+              <Plus /> New video <DropdownMenuShortcut>Alt N</DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setPaletteOpen(true)}>
+              <Search /> Search all projects…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
-        <div className="ml-auto flex items-center gap-2 md:ml-0">
+        <div className="ml-auto flex items-center gap-2">
           <ModelStatus llm={llm} busy={studio.busy} onSettingsSaved={() => setLlmRefresh((n) => n + 1)} settingsOpen={settingsOpen} onSettingsOpenChange={setSettingsOpen} />
-          {project && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button size="sm" onClick={() => studio.openProject(null)}>
-                  <Plus /> New video
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                New video <KbdGroup><Kbd>Alt</Kbd><Kbd>N</Kbd></KbdGroup>
-              </TooltipContent>
-            </Tooltip>
-          )}
+          {project && <ExportMenu project={project} />}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <FolderOpen /> Projects
+              <Button variant="ghost" size="icon" className="size-8" aria-label="More options">
+                <MoreHorizontal />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-80">
-              <DropdownMenuLabel>Recent projects</DropdownMenuLabel>
-              {!recent.length && <p className="px-2 py-1.5 text-xs text-muted-foreground">No projects yet. Describe a video to make your first one.</p>}
-              {recent.slice(0, 12).map((p) => (
-                <DropdownMenuItem key={p.id} onSelect={() => studio.openProject(p.id)} className="group/item flex items-center gap-2">
-                  <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-1.5">
-                      {project?.id === p.id && <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-label="open" />}
-                      <span className="block truncate text-xs">{p.title}</span>
-                    </span>
-                    <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                      <span className="h-1 w-10 overflow-hidden rounded-full bg-muted">
-                        <span className="block h-full rounded-full bg-primary" style={{ width: `${p.slideCount ? (p.approvedCount / p.slideCount) * 100 : 0}%` }} />
-                      </span>
-                      {p.approvedCount}/{p.slideCount} approved · {p.stage}
-                      {p.updatedAt && <> · {formatDistanceToNowStrict(new Date(p.updatedAt), { addSuffix: true })}</>}
-                    </span>
-                  </span>
-                  <button
-                    aria-label={`Delete ${p.title}`}
-                    className="rounded p-1 text-muted-foreground opacity-60 transition-opacity group-hover/item:opacity-100 hover:bg-destructive/20 hover:text-destructive"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setToDelete(p);
-                    }}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </button>
-                </DropdownMenuItem>
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => studio.openProject(null)}>
-                <Plus /> New video
-              </DropdownMenuItem>
+            <DropdownMenuContent align="end" className="w-60">
               <DropdownMenuItem onSelect={() => setPaletteOpen(true)}>
-                <Search /> Search all projects…
+                <Search /> Search projects, slides, actions <DropdownMenuShortcut>{MOD} K</DropdownMenuShortcut>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
+                <Cpu /> AI model settings
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}>
+                {resolvedTheme === "dark" ? <Sun /> : <Moon />} {resolvedTheme === "dark" ? "Light mode" : "Dark mode"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setShortcutsOpen(true)}>
+                <Keyboard /> Keyboard shortcuts <DropdownMenuShortcut>?</DropdownMenuShortcut>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="size-8" aria-label="Keyboard shortcuts" onClick={() => setShortcutsOpen(true)}>
-                <Keyboard />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              Keyboard shortcuts <Kbd>?</Kbd>
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-8"
-                aria-label={resolvedTheme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-                onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-              >
-                {resolvedTheme === "dark" ? <Sun /> : <Moon />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{resolvedTheme === "dark" ? "Light mode" : "Dark mode"}</TooltipContent>
-          </Tooltip>
         </div>
       </header>
 
-      <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-        <ResizablePanel defaultSize="22%" minSize="16%" maxSize="35%">
-          <LibraryPanel
-            registry={registry}
-            theme={project?.theme ?? "midnight"}
-            currentSpec={currentSpec}
-            currentIndex={studio.previewIndex}
-            onApply={studio.applyComponent}
-            onApplyCard={studio.applyCard}
-          />
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel defaultSize="50%" minSize="30%">
-          {studio.loading ? <div className="pm-shimmer h-full" /> : <PreviewPanel studio={studio} registry={registry} recent={recent} />}
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel defaultSize="28%" minSize="20%" maxSize="40%">
-          <ChatPanel studio={studio} llmOnline={llm?.online ?? null} llmProvider={llm?.provider ?? "local"} />
-        </ResizablePanel>
-      </ResizablePanelGroup>
+      <div className="flex min-h-0 flex-1">
+        <ToolRail active={shownPanel} onPick={setPanel} hasProject={!!project} hasSlide={!!currentSpec} onNew={() => studio.openProject(null)} />
+        {shownPanel && (
+          <PanelShell title={panelView[shownPanel].title} subtitle={panelView[shownPanel].subtitle} onClose={() => setPanel(null)}>
+            {panelView[shownPanel].body}
+          </PanelShell>
+        )}
+        <main className="min-w-0 flex-1">
+          {studio.loading ? <div className="pm-shimmer h-full" /> : <PreviewPanel studio={studio} registry={registry} recent={recent} onOpenPanel={setPanel} />}
+        </main>
+        {chatOpen ? (
+          <div className="w-[340px] shrink-0 border-l xl:w-[380px]">
+            <ChatPanel studio={studio} llmOnline={llm?.online ?? null} llmProvider={llm?.provider ?? "local"} onFold={() => setChatOpen(false)} />
+          </div>
+        ) : (
+          <ChatFolded studio={studio} onOpen={() => setChatOpen(true)} />
+        )}
+      </div>
 
       <CommandPalette
         open={paletteOpen}

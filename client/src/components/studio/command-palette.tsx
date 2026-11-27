@@ -160,7 +160,7 @@ const SHORTCUTS: { keys: string[]; label: string }[] = [
   { keys: ["/"], label: "Focus the message box" },
   { keys: ["←", "→"], label: "Previous / next slide" },
   { keys: ["Alt", "N"], label: "New video" },
-  { keys: ["Esc"], label: "Stop the running task" },
+  { keys: ["Esc"], label: "Stop the running task, or close the side panel" },
   { keys: ["?"], label: "Show this list" },
   { keys: ["Enter"], label: "Send a message (Shift + Enter for a new line)" },
   { keys: [MOD, "Enter"], label: "Create the video from the start screen" },

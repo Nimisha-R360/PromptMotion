@@ -1,11 +1,10 @@
 import { useMemo, useState } from "react";
-import { Search, Boxes, Code2, Wand2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ListFilter, Search, Wand2, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { Registry } from "@/lib/api";
 import type { ComponentMeta } from "@backend/runtime/registry";
@@ -17,15 +16,31 @@ const CATEGORY_LABEL: Record<Category, string> = {
   card: "Cards",
   text: "Text effects",
   entrance: "Entrances",
-  list: "Lists & stagger",
+  list: "Lists",
   number: "Counters",
   chart: "Charts",
   background: "Backgrounds",
-  decor: "Decor & SVG",
+  decor: "Decorations",
   transition: "Transitions",
-  scene: "Scenes (remocn)",
+  scene: "Scenes",
+};
+/** What each category changes on a slide, in plain words. */
+const CATEGORY_HINT: Record<Category, string> = {
+  card: "A content block filled with the slide's words",
+  text: "How the title appears",
+  entrance: "How the body text comes in",
+  list: "Bullets and cards coming in one by one",
+  number: "Numbers that count up",
+  chart: "Charts for slides with numbers",
+  background: "Moving backgrounds behind the content",
+  decor: "Icons, shapes and illustrations",
+  transition: "How the slide changes to the next one",
+  scene: "Full-frame animated scenes",
 };
 const CATEGORIES = Object.keys(CATEGORY_LABEL) as Category[];
+
+/** Which part of the library is open: one category, the remocn scene gallery, or the category list (null). */
+export type LibraryCategory = Category | "remocn" | null;
 
 export function FrameworkDot({ fw, className }: { fw: Framework; className?: string }) {
   const color = { remotion: "bg-remotion", anime: "bg-anime", motion: "bg-motion", gsap: "bg-gsap", remocn: "bg-remocn", onda: "bg-onda", magicui: "bg-magicui", lottie: "bg-lottie" }[fw];
@@ -40,154 +55,107 @@ interface Props {
   onApply: (slot: string, id: string, layout?: string) => void;
   /** Onda card on the current slide (null removes it) */
   onApplyCard: (id: string | null, name?: string) => void;
+  /** the open category (the Slide panel's "Change" opens one) */
+  category: LibraryCategory;
+  onCategoryChange: (category: LibraryCategory) => void;
 }
 
-export function LibraryPanel({ registry, theme, currentSpec, currentIndex, onApply, onApplyCard }: Props) {
+/** Rail → Library: categories first, then the effects in one; search looks through all of them. */
+export function LibraryPanel({ registry, theme, currentSpec, currentIndex, onApply, onApplyCard, category, onCategoryChange }: Props) {
   const [query, setQuery] = useState("");
   const [fw, setFw] = useState<Framework | "all">("all");
-  const [cat, setCat] = useState<Category | null>(null);
   const [selected, setSelected] = useState<ComponentMeta | null>(null);
-  const [tab, setTab] = useState("components");
 
   const inUse = useMemo(() => new Set(currentSpec ? [...Object.values(currentSpec.animations), ...(currentSpec.card ? [currentSpec.card] : [])] : []), [currentSpec]);
-  // remocn has its own gallery tab; the Components tab lists the core engines (and Onda)
+  // remocn has its own gallery; the categories list the core engines (and Onda, Magic UI, Lottie)
   const core = useMemo(() => (registry?.components ?? []).filter((c) => c.framework !== "remocn"), [registry]);
   const remocn = useMemo(() => (registry?.components ?? []).filter((c) => c.framework === "remocn"), [registry]);
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return core.filter(
-      (c) =>
-        (fw === "all" || c.framework === fw) &&
-        (!cat || c.category === cat) &&
-        (!q || `${c.name} ${c.id} ${c.description} ${c.uses.join(" ")} ${c.mood.join(" ")}`.toLowerCase().includes(q)),
-    );
-  }, [core, query, fw, cat]);
-
+  const engines = useMemo(() => registry?.frameworks.filter((f) => f.id !== "remocn") ?? [], [registry]);
   const counts = useMemo(() => {
     const m: Record<string, number> = { all: core.length };
     core.forEach((c) => (m[c.framework] = (m[c.framework] ?? 0) + 1));
     return m;
   }, [core]);
 
+  const remocnView = category === "remocn";
+  const q = query.trim().toLowerCase();
+  const shown = useMemo(
+    () =>
+      core.filter(
+        (c) =>
+          (fw === "all" || c.framework === fw) &&
+          (remocnView || !category || c.category === category) &&
+          (!q || `${c.name} ${c.id} ${c.description} ${c.uses.join(" ")} ${c.mood.join(" ")}`.toLowerCase().includes(q)),
+      ),
+    [core, fw, category, remocnView, q],
+  );
+  const cats = CATEGORIES.filter((c) => core.some((x) => x.category === c && (fw === "all" || x.framework === fw)));
+  const engineName = engines.find((f) => f.id === fw)?.name.replace(" (Framer)", "");
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-sidebar">
-      <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0">
-        <div className="flex flex-col gap-3 border-b px-3 pt-3 pb-3">
-          <div className="flex items-center justify-between">
-            <h2 className="flex items-center gap-2 text-sm font-semibold">
-              <Boxes className="size-4 text-primary" /> Library
-            </h2>
-            <TabsList className="h-7">
-              <TabsTrigger value="components" className="px-2 text-xs">
-                Components
-              </TabsTrigger>
-              <TabsTrigger value="primitives" className="px-2 text-xs">
-                Primitives
-              </TabsTrigger>
-            </TabsList>
-          </div>
-          <div className="relative">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-col gap-2 border-b p-3">
+        <div className="flex gap-1.5">
+          <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input aria-label="Search components" placeholder={tab === "remocn" ? "Search remocn, e.g. terminal, pricing, logo…" : "Search effects, e.g. scramble, spring…"} value={query} onChange={(e) => setQuery(e.target.value)} className="h-8 pl-8 text-xs" />
+            <Input
+              aria-label="Search the library"
+              placeholder={remocnView ? "Search scenes, e.g. terminal, pricing…" : "Search effects, e.g. scramble"}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="h-8 pl-8 text-xs"
+            />
             {query && (
               <button aria-label="Clear search" onClick={() => setQuery("")} className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground">
                 <X className="size-3.5" />
               </button>
             )}
           </div>
-          <div className="flex flex-wrap gap-1" role="group" aria-label="Framework filter">
-            {(["all", ...(registry?.frameworks.filter((f) => f.id !== "remocn").map((f) => f.id) ?? [])] as (Framework | "all")[]).map((id) => (
-              <button
-                key={id}
-                onClick={() => {
-                  setFw(id);
-                  if (tab === "remocn") setTab("components");
-                }}
-                aria-pressed={tab !== "remocn" && fw === id}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                  tab !== "remocn" && fw === id ? "border-primary/60 bg-primary/15 text-foreground" : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-              >
-                {id !== "all" && <FrameworkDot fw={id} />}
-                {id === "all" ? "All" : registry?.frameworks.find((f) => f.id === id)?.name.replace(" (Framer)", "")}
-                <span className="text-muted-foreground/70 tabular-nums">{counts[id] ?? 0}</span>
-              </button>
-            ))}
-            <button
-              onClick={() => setTab("remocn")}
-              aria-pressed={tab === "remocn"}
-              className={cn(
-                "flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                tab === "remocn" ? "border-primary/60 bg-primary/15 text-foreground" : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
-              )}
-            >
-              <FrameworkDot fw="remocn" /> remocn
-              <span className="text-muted-foreground/70 tabular-nums">{remocn.length}</span>
-            </button>
-          </div>
+          {!remocnView && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" className={cn("size-8 shrink-0", fw !== "all" && "border-primary/60 bg-primary/10 text-primary")} aria-label="Filter by animation engine" title="Filter by animation engine">
+                  <ListFilter />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuLabel className="text-xs text-muted-foreground">Animation engine</DropdownMenuLabel>
+                <DropdownMenuRadioGroup value={fw} onValueChange={(v) => setFw(v as Framework | "all")}>
+                  <DropdownMenuRadioItem value="all" className="text-xs">
+                    All engines <span className="ml-auto text-muted-foreground tabular-nums">{counts.all}</span>
+                  </DropdownMenuRadioItem>
+                  {engines.map((f) => (
+                    <DropdownMenuRadioItem key={f.id} value={f.id} className="text-xs">
+                      <FrameworkDot fw={f.id} /> {f.name.replace(" (Framer)", "")}
+                      <span className="ml-auto text-muted-foreground tabular-nums">{counts[f.id] ?? 0}</span>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
+        {fw !== "all" && !remocnView && (
+          <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <FrameworkDot fw={fw} /> Only {engineName}
+            <button onClick={() => setFw("all")} className="ml-auto rounded px-1 text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+              Show all
+            </button>
+          </p>
+        )}
+        {category && (
+          <button
+            onClick={() => onCategoryChange(null)}
+            className="-ml-1 flex w-fit items-center gap-0.5 rounded px-1 text-xs text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            <ChevronLeft className="size-3.5" /> All categories
+            <span className="ml-1 font-medium text-foreground">· {remocnView ? "remocn scenes" : CATEGORY_LABEL[category]}</span>
+          </button>
+        )}
+      </div>
 
-        <TabsContent value="components" className="mt-0 flex min-h-0 flex-1 flex-col">
-          <div className="flex gap-1 overflow-x-auto border-b px-3 py-2 [scrollbar-width:none]">
-            <CatChip active={!cat} onClick={() => setCat(null)} label="All" />
-            {CATEGORIES.filter((c) => core.some((x) => x.category === c)).map((c) => (
-              <CatChip key={c} active={cat === c} onClick={() => setCat(cat === c ? null : c)} label={CATEGORY_LABEL[c]} />
-            ))}
-          </div>
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="flex flex-col gap-4 p-3">
-              {!registry &&
-                Array.from({ length: 6 }).map((_, i) => <div key={i} className="pm-shimmer h-16 rounded-lg border bg-card/50" />)}
-              {registry && !filtered.length && (
-                <p className="px-2 py-8 text-center text-xs text-muted-foreground">No components match “{query}”.</p>
-              )}
-              {CATEGORIES.map((c) => {
-                const list = filtered.filter((x) => x.category === c);
-                if (!list.length) return null;
-                return (
-                  <section key={c} aria-label={CATEGORY_LABEL[c]}>
-                    <h3 className="mb-1.5 flex items-center justify-between px-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-                      {CATEGORY_LABEL[c]}
-                      <span className="font-normal normal-case">{c === "card" ? "Onda · whole content block" : `slot: ${CATEGORY_SLOT[c]}`}</span>
-                    </h3>
-                    <ul className="flex flex-col gap-1.5">
-                      {list.map((comp) => (
-                        <li key={comp.id}>
-                          <button
-                            onClick={() => setSelected(comp)}
-                            className="group w-full rounded-lg border bg-card/60 p-2.5 text-left transition-colors hover:border-primary/40 hover:bg-card focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                          >
-                            <div className="flex items-center gap-2">
-                              <FrameworkDot fw={comp.framework} />
-                              <span className="truncate text-xs font-medium">{comp.name}</span>
-                              {inUse.has(comp.id) && (
-                                <Badge variant="secondary" className="ml-auto h-4 px-1.5 text-[10px]">
-                                  in slide {currentIndex + 1}
-                                </Badge>
-                              )}
-                            </div>
-                            <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted-foreground">{comp.description}</p>
-                            <div className="mt-1.5 flex flex-wrap gap-1">
-                              {comp.uses.slice(0, 3).map((u) => (
-                                <code key={u} className="rounded bg-muted px-1 py-px font-mono text-[10px] text-muted-foreground">
-                                  {u}
-                                </code>
-                              ))}
-                            </div>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                );
-              })}
-            </div>
-          </ScrollArea>
-        </TabsContent>
-
-        <TabsContent value="remocn" className="mt-0 flex min-h-0 flex-1 flex-col">
+      {remocnView ? (
+        <div className="flex min-h-0 flex-1 flex-col">
           {registry ? (
             <RemocnBrowser components={remocn} query={query} currentSpec={currentSpec} currentIndex={currentIndex} onApply={onApply} onPreview={setSelected} />
           ) : (
@@ -197,64 +165,87 @@ export function LibraryPanel({ registry, theme, currentSpec, currentIndex, onApp
               ))}
             </div>
           )}
-        </TabsContent>
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="flex flex-col gap-4 p-3">
+            {!registry && Array.from({ length: 6 }).map((_, i) => <div key={i} className="pm-shimmer h-14 rounded-lg border bg-card/50" />)}
 
-        <TabsContent value="primitives" className="mt-0 min-h-0 flex-1">
-          <ScrollArea className="h-full">
-            <div className="flex flex-col gap-4 p-3">
-              {registry?.frameworks
-                .filter((f) => fw === "all" || f.id === fw)
-                .map((f) => (
-                  <section key={f.id} className="rounded-lg border bg-card/50 p-3">
-                    <h3 className="flex items-center gap-2 text-xs font-semibold">
-                      <FrameworkDot fw={f.id} /> {f.name} <span className="font-normal text-muted-foreground">v{f.version}</span>
-                    </h3>
-                    <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{f.description}</p>
-                    <ul className="mt-2 flex flex-col gap-1.5">
-                      {registry.primitives
-                        .filter((p) => p.framework === f.id && (!query || `${p.name} ${p.description}`.toLowerCase().includes(query.toLowerCase())))
-                        .map((p) => (
-                          <li key={p.name} className="flex flex-col gap-0.5">
-                            <span className="flex items-center gap-1.5">
-                              <Code2 className="size-3 text-muted-foreground" />
-                              <code className="font-mono text-[11px]">{p.name}</code>
-                              <span className="text-[10px] text-muted-foreground">{p.kind}</span>
+            {/* the category list: the starting point */}
+            {registry && !category && !q && (
+              <ul className="flex flex-col gap-1.5" aria-label="Categories">
+                {cats.map((c) => (
+                  <li key={c}>
+                    <CategoryRow label={CATEGORY_LABEL[c]} hint={CATEGORY_HINT[c]} count={shown.filter((x) => x.category === c).length} onClick={() => onCategoryChange(c)} />
+                  </li>
+                ))}
+                {fw === "all" && remocn.length > 0 && (
+                  <li>
+                    <CategoryRow label="remocn scenes" hint="Ready-made scenes: terminals, pricing, logos and more" count={remocn.length} onClick={() => onCategoryChange("remocn")} />
+                  </li>
+                )}
+              </ul>
+            )}
+
+            {/* one category, or search results across all of them */}
+            {registry && (category || q) && !shown.length && <p className="px-2 py-8 text-center text-xs text-muted-foreground">Nothing matches{q ? ` “${query}”` : ""}.</p>}
+            {registry &&
+              (category || q) &&
+              CATEGORIES.map((c) => {
+                const list = shown.filter((x) => x.category === c);
+                if (!list.length) return null;
+                return (
+                  <section key={c} aria-label={CATEGORY_LABEL[c]} className="flex flex-col gap-1.5">
+                    {!category && <h3 className="px-1 text-[11px] font-medium text-muted-foreground">{CATEGORY_LABEL[c]}</h3>}
+                    <ul className="flex flex-col gap-1.5">
+                      {list.map((comp) => (
+                        <li key={comp.id}>
+                          <button
+                            onClick={() => setSelected(comp)}
+                            className="flex w-full items-start gap-2.5 rounded-lg border bg-card/60 px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-card focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                          >
+                            <FrameworkDot fw={comp.framework} className="mt-1.5" />
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center gap-2">
+                                <span className="truncate text-sm font-medium">{comp.name}</span>
+                                {inUse.has(comp.id) && (
+                                  <Badge variant="secondary" className="ml-auto h-4 shrink-0 px-1.5 text-[10px]">
+                                    On slide
+                                  </Badge>
+                                )}
+                              </span>
+                              <span className="line-clamp-1 text-xs text-muted-foreground">{comp.description}</span>
                             </span>
-                            <span className="pl-4.5 text-[11px] text-muted-foreground">{p.description}</span>
-                          </li>
-                        ))}
+                          </button>
+                        </li>
+                      ))}
                     </ul>
                   </section>
-                ))}
-            </div>
-          </ScrollArea>
-        </TabsContent>
-      </Tabs>
+                );
+              })}
+          </div>
+        </div>
+      )}
 
-      <ComponentDialog
-        comp={selected}
-        theme={theme}
-        onClose={() => setSelected(null)}
-        currentSpec={currentSpec}
-        currentIndex={currentIndex}
-        onApply={onApply}
-        onApplyCard={onApplyCard}
-      />
+      <ComponentDialog comp={selected} theme={theme} onClose={() => setSelected(null)} currentSpec={currentSpec} currentIndex={currentIndex} onApply={onApply} onApplyCard={onApplyCard} />
     </div>
   );
 }
 
-function CatChip({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+function CategoryRow({ label, hint, count, onClick }: { label: string; hint: string; count: number; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        active ? "border-primary/60 bg-primary/15 text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
-      )}
+      className="flex w-full items-center gap-3 rounded-lg border bg-card/60 px-3 py-2.5 text-left transition-colors hover:border-primary/40 hover:bg-card focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     >
-      {label}
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline gap-2">
+          <span className="text-sm font-medium">{label}</span>
+          <span className="text-[11px] text-muted-foreground tabular-nums">{count}</span>
+        </span>
+        <span className="block truncate text-xs text-muted-foreground">{hint}</span>
+      </span>
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
     </button>
   );
 }
@@ -292,7 +283,6 @@ function ComponentDialog({
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <FrameworkDot fw={comp.framework} className="size-2.5" /> {comp.name}
-                <code className="ml-1 rounded bg-muted px-1.5 py-0.5 font-mono text-xs font-normal text-muted-foreground">{comp.id}</code>
               </DialogTitle>
               <DialogDescription>{comp.description}</DialogDescription>
             </DialogHeader>
@@ -305,20 +295,16 @@ function ComponentDialog({
                 sandbox="allow-scripts"
               />
             </div>
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="text-muted-foreground">Built with</span>
-              {comp.uses.map((u) => (
-                <code key={u} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px]">
-                  {u}
-                </code>
-              ))}
-              <span className="ml-2 text-muted-foreground">Mood</span>
-              {comp.mood.map((m) => (
-                <Badge key={m} variant="outline" className="text-[11px]">
-                  {m}
-                </Badge>
-              ))}
-            </div>
+            {comp.mood.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                <span className="text-muted-foreground">Mood</span>
+                {comp.mood.map((m) => (
+                  <Badge key={m} variant="outline" className="text-[11px]">
+                    {m}
+                  </Badge>
+                ))}
+              </div>
+            )}
             <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs text-muted-foreground">
                 {!currentSpec

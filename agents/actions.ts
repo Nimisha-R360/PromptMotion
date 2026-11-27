@@ -7,7 +7,7 @@ import { getComponent } from "@backend/runtime/registry";
 import { isChartId, isCounterId, isTextRevealId } from "@backend/runtime/cards";
 import { deleteAsset, saveAsset } from "@backend/lib/assets";
 import { speak } from "@backend/lib/voice/tts";
-import { voiceoverLanguageOk } from "@backend/lib/voice/voices";
+import { voiceCoversText, voiceoverLanguageOk } from "@backend/lib/voice/voices";
 import { writeNarration } from "@agents/narration";
 import { getTheme } from "@backend/runtime/themes";
 import { SLOT_CATEGORY, STYLES, type SlideSpec, type Slot } from "@backend/runtime/types";
@@ -149,7 +149,7 @@ export async function voiceSlide(projectId: string, index: number, r: Reporter, 
   }
   const text = spec.narration!.trim();
   const old = spec.voice;
-  if (old && old.text === text && old.voice === voice && old.speed === speed) return { slide: n, seconds: old.duration, upToDate: true };
+  if (old && old.text === text && old.voice === voice && old.speed === speed && voiceCoversText(old)) return { slide: n, seconds: old.duration, upToDate: true };
   r.status("recording", `Recording the voiceover for slide ${n}…`);
   const speech = await speak(text, voice, speed);
   const src = saveAsset(projectId, speech.mp3, "audio/mpeg", `voiceover-slide-${n}.mp3`);

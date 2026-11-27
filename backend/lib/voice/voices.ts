@@ -46,5 +46,12 @@ export function parseVoiceSettings(raw: unknown): VoiceSettings {
   };
 }
 
+/**
+ * True when a recording's captions (one per spoken sentence) add up to its whole script. An early sentence splitter
+ * skipped text around decimals ("4.8"), so those recordings miss words: they count as out of date and get recorded again.
+ */
+export const voiceCoversText = (v: { text: string; captions?: { text: string }[] }) =>
+  !v.captions?.length || v.captions.map((c) => c.text).join(" ") === v.text.replace(/\s+/g, " ").trim();
+
 /** Kokoro speaks English only: other project languages can't have a voiceover. */
 export const voiceoverLanguageOk = (language: string | undefined) => !language || language === "English";

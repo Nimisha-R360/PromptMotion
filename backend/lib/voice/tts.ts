@@ -50,7 +50,8 @@ export function sentences(text: string): string[] {
   const clean = text.replace(/\s+/g, " ").trim();
   if (!clean) return [];
   const out: string[] = [];
-  const re = /[^.!?…]+(?:[.!?…]+(?=\s|$)|$)/g;
+  // a sentence ends at . ! ? … followed by a space or the end; one followed by more text ("4.8", "e.g.") is inside it
+  const re = /(?:[^.!?…]|[.!?…](?=\S))+(?:[.!?…]+(?=\s|$)|$)/g;
   for (const m of clean.matchAll(re)) {
     const s = m[0].trim();
     if (!s) continue;

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Check, Download, Film, Loader2, Paperclip, Plus, RefreshCw, SendHorizontal, TriangleAlert, CircleCheck, ListChecks, Sparkles, MessageCircleQuestion, X, Clapperboard } from "lucide-react";
+import { Check, Download, Film, Loader2, MessageSquare, PanelRightClose, Paperclip, Plus, RefreshCw, SendHorizontal, TriangleAlert, CircleCheck, ListChecks, Sparkles, MessageCircleQuestion, X, Clapperboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { isMediaFile, mediaUrl, type LlmProvider } from "@/lib/api";
 import type { Studio } from "@/hooks/use-studio";
@@ -34,7 +35,28 @@ function Rich({ text }: { text: string }) {
 
 const CLOUD_NAME: Record<Exclude<LlmProvider, "local">, string> = { anthropic: "Claude", openai: "ChatGPT", groq: "Groq" };
 
-export function ChatPanel({ studio, llmOnline, llmProvider }: { studio: Studio; llmOnline: boolean | null; llmProvider: LlmProvider }) {
+/** The chat folded away to a thin strip: one button to open it, with a dot when something waits for the user. */
+export function ChatFolded({ studio, onOpen }: { studio: Studio; onOpen: () => void }) {
+  const { project, busy } = studio;
+  const waiting = project?.stage === "outline_review" || project?.slides.some((s) => s.status === "review");
+  const label = busy ? busy.status : waiting ? "Open the chat: something is waiting for your approval" : "Open the chat";
+  return (
+    <aside aria-label="AI director (folded)" className="flex w-14 shrink-0 flex-col items-center gap-1 border-l bg-sidebar py-2">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" className="relative size-11" aria-label={label} onClick={onOpen}>
+            {busy ? <Loader2 className="size-5 animate-spin text-primary" /> : <MessageSquare className="size-5" />}
+            {waiting && !busy && <span className="absolute top-1.5 right-1.5 size-2.5 rounded-full border-2 border-sidebar bg-amber-400" />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="left">{label}</TooltipContent>
+      </Tooltip>
+      <span className="text-[11px] text-muted-foreground">Chat</span>
+    </aside>
+  );
+}
+
+export function ChatPanel({ studio, llmOnline, llmProvider, onFold }: { studio: Studio; llmOnline: boolean | null; llmProvider: LlmProvider; onFold?: () => void }) {
   const { project, busy } = studio;
   const [text, setText] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
@@ -85,10 +107,14 @@ export function ChatPanel({ studio, llmOnline, llmProvider }: { studio: Studio; 
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-sidebar">
-      <div className="flex items-center gap-2 border-b px-4 py-3">
-        <Bot className="size-4 text-primary" />
-        <h2 className="text-sm font-semibold">Director</h2>
-        <span className="text-[11px] text-muted-foreground">AI agent · plans, designs, animates &amp; asks for your approval</span>
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b pr-2 pl-4">
+        <Sparkles className="size-4 text-primary" />
+        <h2 className="text-sm font-semibold">AI director</h2>
+        {onFold && (
+          <Button variant="ghost" size="icon" className="ml-auto size-8" aria-label="Fold the chat away" title="Fold the chat away" onClick={onFold}>
+            <PanelRightClose />
+          </Button>
+        )}
       </div>
 
       <ScrollArea className="min-h-0 flex-1">
@@ -403,15 +429,18 @@ function AssistantMessage({ m, project, studio, actionable, latest, onRevise }: 
         </button>
         <p className="mt-1">{m.content}</p>
         {comps.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1">
-            {comps.map((c) => (
-              <span key={c.slot} className="flex items-center gap-1 rounded border bg-background/40 px-1.5 py-0.5 text-[10px]">
-                <FrameworkDot fw={c.id.split(".")[0] as Framework} />
-                <span className="text-muted-foreground">{c.slot}:</span>
-                <span className="text-foreground">{c.name ?? c.id}</span>
-              </span>
-            ))}
-          </div>
+          <details className="mt-1.5 text-[11px]">
+            <summary className="cursor-pointer text-muted-foreground/80 select-none hover:text-foreground">Animation details</summary>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {comps.map((c) => (
+                <span key={c.slot} className="flex items-center gap-1 rounded border bg-background/40 px-1.5 py-0.5 text-[10px]">
+                  <FrameworkDot fw={c.id.split(".")[0] as Framework} />
+                  <span className="text-muted-foreground">{c.slot}:</span>
+                  <span className="text-foreground">{c.name ?? c.id}</span>
+                </span>
+              ))}
+            </div>
+          </details>
         )}
         {warn}
         {actionable && (
