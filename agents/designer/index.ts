@@ -1,6 +1,6 @@
 import "server-only";
 import { chatJson, LlmUnavailableError } from "@agents/llm";
-import { THEMES } from "@backend/runtime/themes";
+import { THEMES, isLightTheme } from "@backend/runtime/themes";
 import { LAYOUTS, SLOT_CATEGORY, STYLES, type Framework, type Layout, type SlideSpec, type Slot } from "@backend/runtime/types";
 import { remocnCandidates } from "@backend/runtime/remocn/registry";
 import { MOODS, type MediaAsset, type Mood, type Project, type SlideBrief } from "@backend/lib/types";
@@ -31,11 +31,10 @@ export async function generateOutline(project: Project, feedback: string | undef
   const wanted = asked(feedback) ?? opts.slides ?? asked(project.prompt);
   const count = wanted != null ? Math.min(MAX_SLIDES, Math.max(MIN_SLIDES, Number(wanted))) : undefined;
   // grayscale / light themes look flat — only offer them when the request asks for that look
-  const themeIds = THEMES.map((t) => t.id).filter(
-    (id) =>
-      (id !== "mono" || /\b(mono|monochrome|black and white|black & white|minimal|grayscale)\b/i.test(project.prompt)) &&
-      (id !== "paper" || /\b(light|paper|print|white background|bright)\b/i.test(project.prompt)),
-  );
+  const wantsLight = /\b(light|paper|print|white background|bright|pastel|airy)\b/i.test(project.prompt);
+  const themeIds = THEMES.filter(
+    (t) => (t.id !== "mono" || /\b(mono|monochrome|black and white|black & white|minimal|grayscale)\b/i.test(project.prompt)) && (!isLightTheme(t) || wantsLight),
+  ).map((t) => t.id);
   const user = [
     `VIDEO REQUEST:\n${project.prompt}`,
     ...startOptionsBrief(opts, "outline", count),
